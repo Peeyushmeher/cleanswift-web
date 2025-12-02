@@ -1,0 +1,159 @@
+'use client';
+
+import { useState } from 'react';
+import { formatCurrency, formatDate } from '@/lib/detailer/dashboard-utils';
+import EarningsChart from '@/components/detailer/EarningsChart';
+import OrgEarningsSummary from '@/components/detailer/OrgEarningsSummary';
+import TeamEarningsBreakdown from '@/components/detailer/TeamEarningsBreakdown';
+import PayoutBatches from '@/components/detailer/PayoutBatches';
+
+interface EarningsPageClientProps {
+  earningsData: any[];
+  totalEarnings: number;
+  pendingPayouts: number;
+  mode?: 'solo' | 'organization';
+  orgEarnings?: {
+    grossRevenue: number;
+    netRevenue: number;
+    platformFee: number;
+    totalJobs: number;
+  } | null;
+  teamEarnings?: Array<{ name: string; revenue: number; jobs: number }>;
+  payoutBatches?: any[];
+}
+
+export default function EarningsPageClient({
+  earningsData,
+  totalEarnings,
+  pendingPayouts,
+  mode = 'solo',
+  orgEarnings,
+  teamEarnings = [],
+  payoutBatches = [],
+}: EarningsPageClientProps) {
+  const [period, setPeriod] = useState<'day' | 'week' | 'month'>('day');
+
+  // Prepare chart data
+  const chartData = earningsData.slice(0, 7).map((booking) => ({
+    date: booking.completed_at || booking.scheduled_date || booking.created_at,
+    amount: booking.total_amount || booking.service_price || 0,
+  }));
+
+  const isOrgMode = mode === 'organization' && orgEarnings;
+
+  return (
+    <div className="space-y-6">
+      {/* Summary Cards */}
+      {isOrgMode ? (
+        <OrgEarningsSummary
+          grossRevenue={orgEarnings.grossRevenue}
+          netRevenue={orgEarnings.netRevenue}
+          platformFee={orgEarnings.platformFee}
+          totalJobs={orgEarnings.totalJobs}
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
+          <div className="text-[#C6CFD9] text-sm mb-2">Total Earnings</div>
+          <div className="text-3xl font-bold text-[#32CE7A]">
+            {formatCurrency(totalEarnings)}
+          </div>
+        </div>
+        <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
+          <div className="text-[#C6CFD9] text-sm mb-2">Pending Payouts</div>
+          <div className="text-3xl font-bold text-yellow-400">
+            {formatCurrency(pendingPayouts)}
+          </div>
+        </div>
+        <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
+          <div className="text-[#C6CFD9] text-sm mb-2">Next Payout</div>
+          <div className="text-lg font-semibold text-[#C6CFD9]">
+            TBD (Stripe Connect)
+          </div>
+        </div>
+        </div>
+      )}
+
+      {/* Team Earnings Breakdown (Org Mode) */}
+      {isOrgMode && teamEarnings.length > 0 && (
+        <TeamEarningsBreakdown teams={teamEarnings} />
+      )}
+
+      {/* Payout Batches (Org Mode) */}
+      {isOrgMode && payoutBatches.length > 0 && (
+        <PayoutBatches batches={payoutBatches} />
+      )}
+
+      {/* Earnings Chart */}
+      <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
+        <h2 className="text-xl font-semibold text-white mb-4">Earnings Overview</h2>
+        <EarningsChart data={chartData} period={period} />
+      </div>
+
+      {/* Earnings Table */}
+      <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
+        <h2 className="text-xl font-semibold text-white mb-4">Earnings Breakdown</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-white/5">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-[#C6CFD9] uppercase">
+                  Date
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-[#C6CFD9] uppercase">
+                  Job ID
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-[#C6CFD9] uppercase">
+                  Service
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-[#C6CFD9] uppercase">
+                  Customer
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-[#C6CFD9] uppercase">
+                  Amount
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-[#C6CFD9] uppercase">
+                  Payout
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {earningsData.map((booking) => {
+                const amount = booking.total_amount || booking.service_price || 0;
+                const payout = amount * 0.9; // 10% platform fee
+                return (
+                  <tr key={booking.id} className="hover:bg-white/5">
+                    <td className="px-4 py-3 text-sm text-white">
+                      {formatDate(booking.completed_at || booking.scheduled_date, 'short')}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-[#C6CFD9] font-mono">
+                      {booking.receipt_id}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-white">
+                      {booking.service?.name || 'N/A'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-white">
+                      {booking.user?.full_name || 'N/A'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-white">
+                      {formatCurrency(amount)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-[#32CE7A] font-semibold">
+                      {formatCurrency(payout)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {earningsData.length === 0 && (
+            <div className="text-center py-12 text-[#C6CFD9]">
+              No earnings yet
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
