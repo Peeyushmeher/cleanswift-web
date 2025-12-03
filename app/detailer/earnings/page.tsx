@@ -2,6 +2,7 @@ import { requireDetailer, getDetailerMode } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { getDetailerOrganization, getOrganizationRole } from '@/lib/detailer/mode-detection';
 import { canViewOrgEarnings } from '@/lib/detailer/permissions';
+import { getPlatformFeePercentage, calculatePlatformFee, calculateDetailerPayout } from '@/lib/platform-settings';
 import EarningsPageClient from './EarningsPageClient';
 
 export default async function EarningsPage() {
@@ -50,7 +51,8 @@ export default async function EarningsPage() {
 
     const completedBookings = orgBookings || [];
     const grossRevenue = completedBookings.reduce((sum, b) => sum + (b.total_amount || b.service_price || 0), 0);
-    const platformFee = grossRevenue * 0.1; // 10% platform fee
+    const platformFeePercentage = await getPlatformFeePercentage();
+    const platformFee = await calculatePlatformFee(grossRevenue, platformFeePercentage);
     const netRevenue = grossRevenue - platformFee;
 
     orgEarnings = {
@@ -109,7 +111,8 @@ export default async function EarningsPage() {
 
     earningsData = bookings || [];
     totalEarnings = earningsData.reduce((sum, b) => sum + (b.total_amount || b.service_price || 0), 0);
-    pendingPayouts = totalEarnings * 0.9; // Assume 10% platform fee
+    const platformFeePercentage = await getPlatformFeePercentage();
+    pendingPayouts = await calculateDetailerPayout(totalEarnings, platformFeePercentage);
   }
 
   return (
@@ -128,6 +131,7 @@ export default async function EarningsPage() {
           orgEarnings={orgEarnings}
           teamEarnings={teamEarnings}
           payoutBatches={payoutBatches}
+          platformFeePercentage={await getPlatformFeePercentage()}
         />
       </div>
     </div>

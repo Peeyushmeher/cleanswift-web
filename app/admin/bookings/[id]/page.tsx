@@ -1,4 +1,4 @@
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
@@ -43,7 +43,7 @@ function PaymentBadge({ status, large = false }: { status: string; large?: boole
 
 export default async function AdminBookingDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = createServiceClient();
+  const supabase = await createClient();
 
   // Get booking details with related data
   const { data: bookingRaw, error } = await supabase
@@ -95,52 +95,120 @@ export default async function AdminBookingDetailPage({ params }: { params: Promi
     audit_logs: [], // Would need to query admin_action_logs
   };
 
-  // Get all detailers for assignment dropdown
-  const { data: detailers } = await supabase
+  // Get all detailers for assignment dropdown (including inactive for reference)
+  const { data: allDetailers } = await supabase
     .from('detailers')
     .select('id, full_name, rating, is_active')
-    .eq('is_active', true)
     .order('full_name');
+  
+  // Filter to active detailers for the dropdown
+  const detailers = allDetailers?.filter((d: any) => d.is_active) || [];
 
   // Server actions
   async function assignDetailer(formData: FormData) {
     'use server';
     const detailerId = formData.get('detailer_id') as string;
-    if (detailerId) {
-      const supabase = await createClient();
-      await supabase.rpc('assign_detailer_to_booking', {
-        p_booking_id: id,
-        p_detailer_id: detailerId,
-      });
-      // Log admin action
+    if (!detailerId) {
+      return;
+    }
+
+    const supabase = await createClient();
+    
+    // Verify admin access
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      console.error('Not authenticated');
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+
+    if (profile?.role !== 'admin') {
+      console.error('Only admins can assign detailers');
+      return;
+    }
+
+    const { error: assignError } = await supabase.rpc('assign_detailer_to_booking', {
+      p_booking_id: id,
+      p_detailer_id: detailerId,
+    });
+
+    if (assignError) {
+      console.error('Error assigning detailer:', assignError);
+      return;
+    }
+
+    // Log admin action (non-blocking)
+    try {
       await supabase.rpc('log_admin_action', {
         p_action_type: 'assign_detailer',
         p_entity_type: 'booking',
         p_entity_id: id,
         p_metadata: { detailer_id: detailerId },
       });
-      revalidatePath(`/admin/bookings/${id}`);
+    } catch (err) {
+      console.error('Error logging admin action:', err);
     }
+
+    revalidatePath(`/admin/bookings/${id}`);
+    revalidatePath('/admin/bookings');
   }
 
   async function updateStatus(formData: FormData) {
     'use server';
     const newStatus = formData.get('status') as string;
-    if (newStatus) {
-      const supabase = await createClient();
-      await supabase.rpc('update_booking_status', {
-        p_booking_id: id,
-        p_new_status: newStatus,
-      });
-      // Log admin action
+    if (!newStatus) {
+      return;
+    }
+
+    const supabase = await createClient();
+    
+    // Verify admin access
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      console.error('Not authenticated');
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+
+    if (profile?.role !== 'admin') {
+      console.error('Only admins can update booking status');
+      return;
+    }
+
+    const { error: updateError } = await supabase.rpc('update_booking_status', {
+      p_booking_id: id,
+      p_new_status: newStatus,
+    });
+
+    if (updateError) {
+      console.error('Error updating booking status:', updateError);
+      return;
+    }
+
+    // Log admin action (non-blocking)
+    try {
       await supabase.rpc('log_admin_action', {
         p_action_type: 'update_status',
         p_entity_type: 'booking',
         p_entity_id: id,
         p_metadata: { new_status: newStatus },
       });
-      revalidatePath(`/admin/bookings/${id}`);
+    } catch (err) {
+      console.error('Error logging admin action:', err);
     }
+
+    revalidatePath(`/admin/bookings/${id}`);
+    revalidatePath('/admin/bookings');
   }
 
   async function addNote(formData: FormData) {
@@ -188,10 +256,11 @@ export default async function AdminBookingDetailPage({ params }: { params: Promi
     }
   }
 
-  // Calculate platform fee (15%)
-  const platformFeePercent = 15;
-  const platformFee = (booking.total_amount * platformFeePercent) / 100;
-  const detailerPayout = booking.total_amount - platformFee;
+  // Calculate platform fee using configured percentage
+  const { getPlatformFeePercentage, calculatePlatformFee, calculateDetailerPayout } = await import('@/lib/platform-settings');
+  const platformFeePercent = await getPlatformFeePercentage();
+  const platformFee = await calculatePlatformFee(parseFloat(booking.total_amount || '0'), platformFeePercent);
+  const detailerPayout = await calculateDetailerPayout(parseFloat(booking.total_amount || '0'), platformFeePercent);
 
   return (
     <div className="p-6 lg:p-8">
@@ -517,18 +586,19 @@ export default async function AdminBookingDetailPage({ params }: { params: Promi
                 <form action={assignDetailer} className="pt-2">
                   <select
                     name="detailer_id"
+                    required
                     className="w-full px-3 py-2 bg-[#050B12] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#32CE7A]/50 text-sm"
                   >
                     <option value="">Reassign to...</option>
-                    {detailers?.filter((d: any) => d.id !== booking.detailer?.id).map((d: any) => (
-                      <option key={d.id} value={d.id}>{d.full_name} {!d.is_active && '(Inactive)'}</option>
+                    {detailers?.filter((d: any) => d.id !== booking.detailer?.id && d.is_active).map((d: any) => (
+                      <option key={d.id} value={d.id}>{d.full_name}</option>
                     ))}
                   </select>
                   <button
                     type="submit"
-                    className="w-full mt-2 px-4 py-2 bg-[#050B12] hover:bg-white/5 text-[#C6CFD9] hover:text-white border border-white/10 rounded-lg transition-colors text-sm"
+                    className="w-full mt-2 px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 border border-blue-500/30 rounded-lg transition-colors text-sm font-medium"
                   >
-                    Reassign
+                    Reassign Detailer
                   </button>
                 </form>
               </div>
@@ -564,6 +634,7 @@ export default async function AdminBookingDetailPage({ params }: { params: Promi
               <select
                 name="status"
                 defaultValue={booking.status}
+                required
                 className="w-full px-3 py-2 bg-[#050B12] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#32CE7A]/50"
               >
                 <option value="pending">Pending</option>
@@ -578,7 +649,7 @@ export default async function AdminBookingDetailPage({ params }: { params: Promi
               </select>
               <button
                 type="submit"
-                className="w-full px-4 py-2 bg-[#050B12] hover:bg-white/5 text-white border border-white/10 rounded-lg transition-colors"
+                className="w-full px-4 py-2 bg-[#32CE7A] hover:bg-[#2AB869] text-white font-medium rounded-lg transition-colors"
               >
                 Update Status
               </button>

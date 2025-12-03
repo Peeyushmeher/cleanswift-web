@@ -166,6 +166,8 @@ export default function JobsFilters({
             placeholder="Search by booking ID, customer name, or license plate..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            autoComplete="off"
+            data-form-type="other"
             suppressHydrationWarning
             className="w-full px-4 py-2 bg-[#050B12] border border-white/5 rounded-lg text-white placeholder-[#C6CFD9] focus:outline-none focus:border-[#32CE7A]/40"
           />

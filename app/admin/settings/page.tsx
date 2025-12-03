@@ -17,8 +17,16 @@ function StatusBadge({ isActive }: { isActive: boolean }) {
 export default async function AdminSettingsPage() {
   const supabase = await createClient();
 
-  // Get platform settings
-  const { data: settings } = await supabase.rpc('get_platform_settings');
+  // Get platform settings - use direct query instead of RPC to avoid auth context issues
+  const { data: settingsData } = await supabase
+    .from('platform_settings')
+    .select('key, value');
+  
+  // Convert array to object format (like get_platform_settings returns)
+  const settings = settingsData?.reduce((acc: any, item: any) => {
+    acc[item.key] = item.value;
+    return acc;
+  }, {}) || {};
 
   // Get service areas
   const { data: serviceAreas } = await supabase.rpc('get_all_service_areas');
@@ -108,6 +116,79 @@ export default async function AdminSettingsPage() {
     revalidatePath('/admin/settings');
   }
 
+  async function updatePlatformFee(formData: FormData) {
+    'use server';
+    const supabase = await createClient();
+    
+    // Verify user is authenticated and is an admin
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      throw new Error('Not authenticated');
+    }
+    
+    // Check if user is admin
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+    
+    if (profileError || !profile || profile.role !== 'admin') {
+      throw new Error('Only admins can update platform settings');
+    }
+    
+    const feePercentageStr = formData.get('platform_fee_percentage') as string;
+    const feePercentage = parseFloat(feePercentageStr);
+    
+    if (isNaN(feePercentage) || feePercentage < 0 || feePercentage > 100) {
+      throw new Error('Platform fee percentage must be between 0 and 100');
+    }
+
+    console.log('Updating platform fee to:', feePercentage, 'User ID:', user.id, 'Role:', profile.role);
+
+    // Use direct database update instead of RPC function
+    // The RPC function's auth.uid() context doesn't work correctly in server actions
+    // This is safe because we've already verified the user is an admin above
+    // RLS policies will also enforce admin-only access
+    const { error: updateError } = await supabase
+      .from('platform_settings')
+      .update({ 
+        value: feePercentage,
+        updated_at: new Date().toISOString()
+      })
+      .eq('key', 'platform_fee_percentage');
+    
+    if (updateError) {
+      console.error('Error updating platform fee:', updateError);
+      throw new Error(`Failed to update platform fee: ${updateError.message}`);
+    }
+    
+    console.log('Platform fee updated successfully to:', feePercentage);
+    
+    // Verify the update worked by checking the database directly (not using RPC)
+    const { data: verifySetting, error: verifyError } = await supabase
+      .from('platform_settings')
+      .select('value')
+      .eq('key', 'platform_fee_percentage')
+      .single();
+    
+    if (verifyError) {
+      console.error('Error verifying update:', verifyError);
+    } else {
+      const updatedValue = typeof verifySetting.value === 'number' 
+        ? verifySetting.value 
+        : parseFloat(verifySetting.value as string);
+      console.log('Verified platform fee value after update:', updatedValue, 'Type:', typeof updatedValue);
+      
+      // If the value didn't update correctly, log a warning
+      if (updatedValue !== feePercentage) {
+        console.warn(`Value mismatch! Expected ${feePercentage}, got ${updatedValue}`);
+      }
+    }
+    
+    revalidatePath('/admin/settings');
+  }
+
   const bookingRules = settings?.booking_rules || {
     minimum_notice_hours: 24,
     cancellation_cutoff_hours: 4,
@@ -122,12 +203,53 @@ export default async function AdminSettingsPage() {
     reminder_hours_before: 24,
   };
 
+  // The platform_fee_percentage is stored as a number in jsonb
+  const platformFeePercentage = settings?.platform_fee_percentage 
+    ? (typeof settings.platform_fee_percentage === 'number' 
+        ? settings.platform_fee_percentage 
+        : parseFloat(settings.platform_fee_percentage as string))
+    : 15;
+
   return (
     <div className="p-6 lg:p-8">
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white mb-2">Settings</h1>
         <p className="text-[#C6CFD9]">Configure platform settings and service areas</p>
+      </div>
+
+      {/* Platform Fee Setting */}
+      <div className="mb-6 bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
+        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <svg className="w-5 h-5 text-[#32CE7A]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+          </svg>
+          Platform Fee Percentage
+        </h2>
+        <form action={updatePlatformFee} className="space-y-4" suppressHydrationWarning>
+          <div>
+            <label className="text-sm text-[#C6CFD9] mb-1 block">Platform Fee Percentage (%)</label>
+            <input
+              type="number"
+              name="platform_fee_percentage"
+              defaultValue={platformFeePercentage}
+              min="0"
+              max="100"
+              step="0.1"
+              className="w-full px-3 py-2 bg-[#050B12] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#32CE7A]/50"
+              suppressHydrationWarning
+            />
+            <p className="text-xs text-[#C6CFD9]/60 mt-1">
+              The percentage of each booking that goes to the platform. This affects all future bookings.
+            </p>
+          </div>
+          <button
+            type="submit"
+            className="w-full px-4 py-2 bg-[#32CE7A] hover:bg-[#2AB869] text-white font-medium rounded-lg transition-colors"
+          >
+            Save Platform Fee
+          </button>
+        </form>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -388,7 +510,7 @@ export default async function AdminSettingsPage() {
       <div className="mt-6 bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
         <h2 className="text-lg font-semibold text-white mb-4">Admin Information</h2>
         <div className="text-sm text-[#C6CFD9] space-y-2">
-          <p>Platform Fee: <span className="text-white font-medium">15%</span></p>
+          <p>Platform Fee: <span className="text-white font-medium">{platformFeePercentage}%</span></p>
           <p>Currency: <span className="text-white font-medium">CAD</span></p>
           <p>Version: <span className="text-white font-medium">1.0.0</span></p>
         </div>

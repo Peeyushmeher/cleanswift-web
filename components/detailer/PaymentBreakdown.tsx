@@ -7,6 +7,7 @@ interface PaymentBreakdownProps {
   totalAmount: number;
   tipAmount?: number;
   platformFee?: number;
+  platformFeePercentage?: number;
 }
 
 export default function PaymentBreakdown({
@@ -16,9 +17,10 @@ export default function PaymentBreakdown({
   totalAmount,
   tipAmount = 0,
   platformFee,
+  platformFeePercentage = 15,
 }: PaymentBreakdownProps) {
-  // Calculate platform fee if not provided (assume 10% for now)
-  const calculatedPlatformFee = platformFee || totalAmount * 0.1;
+  // Calculate platform fee if not provided
+  const calculatedPlatformFee = platformFee ?? (totalAmount * platformFeePercentage) / 100;
   const payoutAmount = totalAmount - calculatedPlatformFee;
 
   return (
@@ -54,7 +56,7 @@ export default function PaymentBreakdown({
         {calculatedPlatformFee > 0 && (
           <>
             <div className="flex justify-between text-[#C6CFD9]">
-              <span>Platform Fee (10%):</span>
+              <span>Platform Fee ({platformFeePercentage}%):</span>
               <span className="text-white">{formatCurrency(calculatedPlatformFee)}</span>
             </div>
             <div className="border-t border-white/10 pt-2 mt-2">

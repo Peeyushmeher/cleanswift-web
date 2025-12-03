@@ -1,4 +1,4 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 
@@ -15,8 +15,8 @@ function StatusBadge({ isActive }: { isActive: boolean }) {
 }
 
 export default async function AdminOrganizationsPage() {
-  // Use service client since proxy.ts already verified admin access
-  const supabase = createServiceClient();
+  // Use regular client - proxy.ts already verified admin access and RLS allows admins
+  const supabase = await createClient();
 
   // Get all organizations
   const { data: orgsRaw, error } = await supabase
@@ -79,7 +79,7 @@ export default async function AdminOrganizationsPage() {
     const currentStatus = formData.get('current_status') === 'true';
     
     if (orgId) {
-      const supabase = createServiceClient();
+      const supabase = await createClient();
       
       await supabase
         .from('organizations')

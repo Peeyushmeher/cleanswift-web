@@ -46,36 +46,77 @@ export async function proxy(request: NextRequest) {
   // getSession() reads from cookies which may not be immediately updated after login
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
   
-  // Get session separately for role checks
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  // If getUser() fails, user is not authenticated
+  const isAuthenticated = !authError && user !== null;
 
   const { pathname } = request.nextUrl;
 
   // Protect detailer routes
   if (pathname.startsWith('/detailer')) {
-    if (!user || !session) {
+    // Allow access to pending page without active check
+    if (pathname === '/detailer/pending') {
+      if (!isAuthenticated) {
+        return NextResponse.redirect(new URL('/auth/login', request.url));
+      }
+      // Basic role check only
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user!.id)
+        .single();
+      
+      if (!profile || (profile.role !== 'detailer' && profile.role !== 'admin')) {
+        return NextResponse.redirect(new URL('/auth/login', request.url));
+      }
+      // Allow access to pending page
+      return supabaseResponse;
+    }
+
+    if (!isAuthenticated) {
       return NextResponse.redirect(new URL('/auth/login', request.url));
     }
 
     // Check user role
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('role')
-      .eq('id', user.id)
+      .select('role, onboarding_completed')
+      .eq('id', user!.id)
       .single();
 
     if (profileError || !profile || (profile.role !== 'detailer' && profile.role !== 'admin')) {
       return NextResponse.redirect(new URL('/auth/login', request.url));
     }
+
+    // Admins can always access
+    if (profile.role === 'admin') {
+      return supabaseResponse;
+    }
+
+    // Check onboarding status
+    if (!profile.onboarding_completed) {
+      return NextResponse.redirect(new URL('/onboard', request.url));
+    }
+
+    // Check if detailer is active
+    const { data: detailer } = await supabase
+      .from('detailers')
+      .select('is_active')
+      .eq('profile_id', user!.id)
+      .single();
+
+    // If no detailer record or not active, redirect to home
+    // (User should have been signed out after onboarding and will log in after approval)
+    if (!detailer || !detailer.is_active) {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
   }
 
   // Protect admin routes
   if (pathname.startsWith('/admin')) {
-    if (!user || !session) {
+    if (!isAuthenticated) {
       return NextResponse.redirect(new URL('/auth/login', request.url));
     }
 
@@ -83,7 +124,7 @@ export async function proxy(request: NextRequest) {
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('role')
-      .eq('id', user.id)
+      .eq('id', user!.id)
       .single();
 
     if (profileError || !profile || profile.role !== 'admin') {
@@ -92,11 +133,11 @@ export async function proxy(request: NextRequest) {
   }
 
   // Redirect authenticated users away from login page
-  if (pathname.startsWith('/auth/login') && user && session) {
+  if (pathname.startsWith('/auth/login') && isAuthenticated) {
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('role')
-      .eq('id', user.id)
+      .eq('id', user!.id)
       .single();
 
     // Only redirect if we successfully got the profile
@@ -105,6 +146,29 @@ export async function proxy(request: NextRequest) {
       if (profile.role === 'admin') {
         return NextResponse.redirect(new URL('/admin/dashboard', request.url));
       } else if (profile.role === 'detailer') {
+        // Check onboarding and active status for detailers
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('onboarding_completed')
+          .eq('id', user!.id)
+          .single();
+
+        if (!profileData?.onboarding_completed) {
+          return NextResponse.redirect(new URL('/onboard', request.url));
+        }
+
+        const { data: detailer } = await supabase
+          .from('detailers')
+          .select('is_active')
+          .eq('profile_id', user!.id)
+          .single();
+
+        // If detailer is not active, they need to wait for approval
+        // Redirect to home page with a message (they'll be notified via email)
+        if (!detailer || !detailer.is_active) {
+          return NextResponse.redirect(new URL('/', request.url));
+        }
+
         return NextResponse.redirect(new URL('/detailer/dashboard', request.url));
       }
     }

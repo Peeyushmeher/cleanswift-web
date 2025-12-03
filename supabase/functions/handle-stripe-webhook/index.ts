@@ -275,6 +275,45 @@ async function handlePaymentIntentSucceeded(
       // Don't throw - payment_status was updated successfully
     } else {
       console.log('✅ Updated booking status to "paid" via state machine');
+      
+      // Immediately call auto-assign function to assign detailer and set status to 'offered'
+      // This ensures it happens synchronously instead of relying on triggers
+      const { data: assignedDetailerId, error: assignError } = await supabase
+        .rpc('auto_assign_booking', {
+          p_booking_id: bookingId,
+        });
+
+      if (assignError) {
+        console.error('❌ Failed to auto-assign detailer:', assignError);
+        // Don't throw - booking is still paid, can be assigned manually later
+      } else if (assignedDetailerId) {
+        console.log(`✅ Auto-assigned booking to detailer ${assignedDetailerId}, status should be "offered"`);
+        
+        // Verify the status was updated to 'offered'
+        const { data: finalBooking } = await supabase
+          .from('bookings')
+          .select('status, detailer_id')
+          .eq('id', bookingId)
+          .single();
+        
+        if (finalBooking) {
+          if (finalBooking.status === 'offered') {
+            console.log('✅ Booking status correctly set to "offered"');
+          } else {
+            console.warn(`⚠️  Booking has detailer but status is "${finalBooking.status}" instead of "offered" - fixing...`);
+            // Fix the status if it's still 'paid'
+            if (finalBooking.status === 'paid') {
+              await supabase
+                .from('bookings')
+                .update({ status: 'offered' })
+                .eq('id', bookingId);
+              console.log('✅ Fixed booking status to "offered"');
+            }
+          }
+        }
+      } else {
+        console.log('ℹ️  No available detailer found for auto-assignment (booking remains "paid" and unassigned)');
+      }
     }
   } else {
     console.log(`ℹ️  Booking status is "${booking.status}", not updating via state machine`);

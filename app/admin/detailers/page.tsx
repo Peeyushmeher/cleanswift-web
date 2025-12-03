@@ -1,4 +1,4 @@
-import { createServiceClient, createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 
@@ -22,8 +22,8 @@ export default async function AdminDetailersPage({
     type?: string;
   }>;
 }) {
-  // Use service client since proxy.ts already verified admin access
-  const supabase = createServiceClient();
+  // Use regular client - proxy.ts already verified admin access and RLS allows admins
+  const supabase = await createClient();
   const params = await searchParams;
 
   // Get all detailers with related data
@@ -51,14 +51,14 @@ export default async function AdminDetailersPage({
     console.error('Error fetching detailers:', error);
   }
 
-  // Fetch profile emails separately for those who have profile_id
+  // Fetch profile emails and onboarding status separately for those who have profile_id
   let detailersWithProfiles = detailers || [];
   const profileIds = detailersWithProfiles.filter((d: any) => d.profile_id).map((d: any) => d.profile_id);
   
   if (profileIds.length > 0) {
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, email, phone')
+      .select('id, email, phone, onboarding_completed')
       .in('id', profileIds);
     
     const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
@@ -66,6 +66,7 @@ export default async function AdminDetailersPage({
     detailersWithProfiles = detailersWithProfiles.map((d: any) => ({
       ...d,
       profile: d.profile_id ? profileMap.get(d.profile_id) : null,
+      is_pending: d.profile_id && profileMap.get(d.profile_id)?.onboarding_completed && !d.is_active,
     }));
   }
 
@@ -75,6 +76,9 @@ export default async function AdminDetailersPage({
     filteredDetailers = filteredDetailers.filter((d: any) => d.is_active);
   } else if (params.status === 'inactive') {
     filteredDetailers = filteredDetailers.filter((d: any) => !d.is_active);
+  } else if (params.status === 'pending') {
+    // Pending = onboarding completed but not active
+    filteredDetailers = filteredDetailers.filter((d: any) => d.is_pending);
   }
 
   if (params.type === 'solo') {
@@ -130,6 +134,7 @@ export default async function AdminDetailersPage({
   // Calculate stats
   const totalDetailers = detailersWithProfiles.length;
   const activeDetailers = detailersWithProfiles.filter((d: any) => d.is_active).length;
+  const pendingDetailers = detailersWithProfiles.filter((d: any) => d.is_pending).length;
   const soloDetailers = detailersWithProfiles.filter((d: any) => !d.organization_id).length;
   const orgDetailers = detailersWithProfiles.filter((d: any) => d.organization_id).length;
 
@@ -142,7 +147,7 @@ export default async function AdminDetailersPage({
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-4">
           <div className="text-[#C6CFD9] text-sm">Total</div>
           <div className="text-2xl font-bold text-white">{totalDetailers}</div>
@@ -150,6 +155,12 @@ export default async function AdminDetailersPage({
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-4">
           <div className="text-[#C6CFD9] text-sm">Active</div>
           <div className="text-2xl font-bold text-[#32CE7A]">{activeDetailers}</div>
+        </div>
+        <div className={`bg-[#0A1A2F] border rounded-xl p-4 ${pendingDetailers > 0 ? 'border-yellow-500/50 bg-yellow-500/5' : 'border-white/5'}`}>
+          <div className="text-[#C6CFD9] text-sm">Pending</div>
+          <div className={`text-2xl font-bold ${pendingDetailers > 0 ? 'text-yellow-400' : 'text-white'}`}>
+            {pendingDetailers}
+          </div>
         </div>
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-4">
           <div className="text-[#C6CFD9] text-sm">Solo</div>
@@ -195,6 +206,16 @@ export default async function AdminDetailersPage({
               }`}
             >
               Inactive
+            </Link>
+            <Link
+              href={buildFilterUrl({ status: 'pending' })}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                params.status === 'pending'
+                  ? 'bg-yellow-500 text-white'
+                  : 'bg-[#050B12] text-[#C6CFD9] hover:bg-white/5 border border-white/10'
+              }`}
+            >
+              Pending {pendingDetailers > 0 && `(${pendingDetailers})`}
             </Link>
           </div>
 
@@ -262,7 +283,12 @@ export default async function AdminDetailersPage({
               </thead>
               <tbody>
                 {filteredDetailers.map((detailer: any) => (
-                    <tr key={detailer.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <tr 
+                      key={detailer.id} 
+                      className={`border-b border-white/5 hover:bg-white/5 transition-colors ${
+                        detailer.is_pending ? 'bg-yellow-500/10 border-l-4 border-l-yellow-500' : ''
+                      }`}
+                    >
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-[#32CE7A]/20 flex items-center justify-center flex-shrink-0">
@@ -316,30 +342,42 @@ export default async function AdminDetailersPage({
                         </div>
                       </td>
                       <td className="py-3 px-4">
-                        <StatusBadge isActive={detailer.is_active} />
+                        {detailer.is_pending ? (
+                          <span className="px-2 py-1 rounded-md text-xs font-medium bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                            Pending Approval
+                          </span>
+                        ) : (
+                          <StatusBadge isActive={detailer.is_active} />
+                        )}
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
                           <Link
                             href={`/admin/detailers/${detailer.id}`}
-                            className="px-3 py-1.5 text-sm text-[#32CE7A] hover:text-[#6FF0C4] hover:bg-[#32CE7A]/10 rounded-lg transition-colors"
+                            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                              detailer.is_pending
+                                ? 'bg-[#32CE7A] hover:bg-[#2AB869] text-white font-semibold'
+                                : 'text-[#32CE7A] hover:text-[#6FF0C4] hover:bg-[#32CE7A]/10'
+                            }`}
                           >
-                            View
+                            {detailer.is_pending ? 'Review Application' : 'View'}
                           </Link>
-                          <form action={toggleDetailerStatus}>
-                            <input type="hidden" name="detailer_id" value={detailer.id} />
-                            <input type="hidden" name="current_status" value={String(detailer.is_active)} />
-                            <button
-                              type="submit"
-                              className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                                detailer.is_active
-                                  ? 'text-red-400 hover:bg-red-500/10'
-                                  : 'text-[#32CE7A] hover:bg-[#32CE7A]/10'
-                              }`}
-                            >
-                              {detailer.is_active ? 'Deactivate' : 'Activate'}
-                            </button>
-                          </form>
+                          {!detailer.is_pending && (
+                            <form action={toggleDetailerStatus}>
+                              <input type="hidden" name="detailer_id" value={detailer.id} />
+                              <input type="hidden" name="current_status" value={String(detailer.is_active)} />
+                              <button
+                                type="submit"
+                                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                                  detailer.is_active
+                                    ? 'text-red-400 hover:bg-red-500/10'
+                                    : 'text-[#32CE7A] hover:bg-[#32CE7A]/10'
+                                }`}
+                              >
+                                {detailer.is_active ? 'Deactivate' : 'Activate'}
+                              </button>
+                            </form>
+                          )}
                         </div>
                       </td>
                     </tr>

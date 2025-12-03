@@ -20,6 +20,8 @@ interface BookingDetailClientProps {
   canUpdateStatus: boolean;
   canReassign: boolean;
   organizationId?: string;
+  platformFee?: number;
+  platformFeePercentage?: number;
 }
 
 export default function BookingDetailClient({
@@ -30,6 +32,8 @@ export default function BookingDetailClient({
   canUpdateStatus,
   canReassign,
   organizationId,
+  platformFee,
+  platformFeePercentage = 15,
 }: BookingDetailClientProps) {
   const [assignmentModalOpen, setAssignmentModalOpen] = useState(false);
   const router = useRouter();
@@ -160,6 +164,8 @@ export default function BookingDetailClient({
             addonsTotal={booking.addons_total || 0}
             taxAmount={booking.tax_amount || 0}
             totalAmount={booking.total_amount || 0}
+            platformFee={platformFee}
+            platformFeePercentage={platformFeePercentage}
           />
         </div>
 

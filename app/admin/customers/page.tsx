@@ -1,4 +1,4 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 
 export default async function AdminCustomersPage({
@@ -6,8 +6,8 @@ export default async function AdminCustomersPage({
 }: {
   searchParams: Promise<{ page?: string }>;
 }) {
-  // Use service client since proxy.ts already verified admin access
-  const supabase = createServiceClient();
+  // Use regular client - proxy.ts already verified admin access and RLS allows admins
+  const supabase = await createClient();
   const params = await searchParams;
 
   const currentPage = parseInt(params.page || '1');

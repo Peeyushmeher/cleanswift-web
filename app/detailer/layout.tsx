@@ -1,4 +1,4 @@
-import { requireDetailer, getDetailerMode } from '@/lib/auth';
+import { requireActiveDetailer, getDetailerMode } from '@/lib/auth';
 import Sidebar from '@/components/detailer/Sidebar';
 import Header from '@/components/detailer/Header';
 
@@ -7,7 +7,7 @@ export default async function DetailerLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const profile = await requireDetailer();
+  const profile = await requireActiveDetailer();
   const mode = await getDetailerMode();
 
   return (

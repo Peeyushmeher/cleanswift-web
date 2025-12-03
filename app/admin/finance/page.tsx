@@ -1,4 +1,5 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
+import { getPlatformFeePercentage, calculatePlatformFee, calculateDetailerPayout } from '@/lib/platform-settings';
 import Link from 'next/link';
 
 function PaymentBadge({ status }: { status: string }) {
@@ -26,8 +27,8 @@ export default async function AdminFinancePage({
     page?: string;
   }>;
 }) {
-  // Use service client since proxy.ts already verified admin access
-  const supabase = createServiceClient();
+  // Use regular client - proxy.ts already verified admin access and RLS allows admins
+  const supabase = await createClient();
   const params = await searchParams;
 
   const currentPage = parseInt(params.page || '1');
@@ -41,8 +42,9 @@ export default async function AdminFinancePage({
 
   const paidBookings = allBookings?.filter(b => b.payment_status === 'paid') || [];
   const totalRevenue = paidBookings.reduce((sum, b) => sum + parseFloat(b.total_amount || '0'), 0);
-  const platformFees = totalRevenue * 0.15;
-  const detailerPayouts = totalRevenue * 0.85;
+  const platformFeePercentage = await getPlatformFeePercentage();
+  const platformFees = await calculatePlatformFee(totalRevenue, platformFeePercentage);
+  const detailerPayouts = await calculateDetailerPayout(totalRevenue, platformFeePercentage);
 
   const stats = {
     total_revenue: totalRevenue.toFixed(2),
@@ -77,7 +79,20 @@ export default async function AdminFinancePage({
     query = query.lte('created_at', params.date_to + 'T23:59:59');
   }
 
-  const { data: transactions } = await query;
+  const { data: transactionsRaw } = await query;
+
+  // Calculate platform fees and payouts for each transaction
+  const transactions = (transactionsRaw || []).map((tx: any) => {
+    const amount = parseFloat(tx.total_amount || '0');
+    const fee = (amount * platformFeePercentage) / 100;
+    const payout = amount - fee;
+    return {
+      ...tx,
+      customer: tx.user, // Map user to customer for consistency
+      platform_fee: fee.toFixed(2),
+      detailer_payout: payout.toFixed(2),
+    };
+  });
 
   return (
     <div className="p-6 lg:p-8">

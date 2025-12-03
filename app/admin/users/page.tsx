@@ -1,4 +1,4 @@
-import { createServiceClient, createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 
 export default async function AdminUsersPage({
@@ -6,8 +6,8 @@ export default async function AdminUsersPage({
 }: {
   searchParams: Promise<{ role?: string }>;
 }) {
-  // Use service client since proxy.ts already verified admin access
-  const supabase = createServiceClient();
+  // Use regular client - proxy.ts already verified admin access and RLS allows admins
+  const supabase = await createClient();
   const params = await searchParams;
 
   const roleFilter = params.role || null;

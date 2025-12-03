@@ -1,4 +1,5 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
+import { getPlatformFeePercentage, calculatePlatformFee } from '@/lib/platform-settings';
 import Link from 'next/link';
 
 // Status badge component
@@ -54,8 +55,8 @@ function AlertCard({
 }
 
 export default async function AdminDashboardPage() {
-  // Use service client since proxy.ts already verified admin access
-  const supabase = createServiceClient();
+  // Use regular client - proxy.ts already verified admin access and RLS allows admins
+  const supabase = await createClient();
 
   // Get today's date for filtering
   const today = new Date().toISOString().split('T')[0];
@@ -84,8 +85,63 @@ export default async function AdminDashboardPage() {
     .is('detailer_id', null)
     .in('status', ['pending', 'paid', 'accepted']);
 
-  // Calculate platform earnings (15% fee)
-  const platformEarningsToday = revenueToday * 0.15;
+  // Get pending detailer applications
+  // Query detailers and profiles separately for better reliability
+  const { data: allDetailers, error: detailersError } = await supabase
+    .from('detailers')
+    .select('id, full_name, avatar_url, years_experience, created_at, profile_id')
+    .eq('is_active', false)
+    .order('created_at', { ascending: false });
+
+  if (detailersError) {
+    console.error('Error fetching detailers for dashboard:', detailersError);
+  }
+
+  // Get profiles to check onboarding status
+  let pendingDetailers: any[] = [];
+  
+  if (allDetailers && allDetailers.length > 0) {
+    // Extract unique profile IDs
+    const profileIds = [...new Set(allDetailers
+      .filter((d: any) => d.profile_id)
+      .map((d: any) => d.profile_id))];
+    
+    if (profileIds.length > 0) {
+      // Fetch profiles with onboarding_completed = true
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, email, phone, onboarding_completed')
+        .in('id', profileIds)
+        .eq('onboarding_completed', true);
+      
+      if (profilesError) {
+        console.error('Error fetching profiles for dashboard:', profilesError);
+      }
+      
+      // Create a map of profile IDs that have completed onboarding
+      const completedProfileIds = new Set((profiles || []).map((p: any) => p.id));
+      const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+      
+      // Filter detailers: must have profile_id AND profile must have onboarding_completed = true
+      pendingDetailers = allDetailers
+        .filter((d: any) => {
+          return d.profile_id && completedProfileIds.has(d.profile_id);
+        })
+        .map((d: any) => ({
+          ...d,
+          profile: profileMap.get(d.profile_id) || null,
+        }))
+        .slice(0, 5); // Limit to 5 most recent for dashboard
+    }
+  }
+  
+  // Debug logging
+  console.log('Dashboard - Inactive detailers found:', allDetailers?.length || 0);
+  console.log('Dashboard - Pending detailers (after filtering):', pendingDetailers.length);
+
+  // Calculate platform earnings using configured fee percentage
+  const platformFeePercentage = await getPlatformFeePercentage();
+  const platformEarningsToday = await calculatePlatformFee(revenueToday, platformFeePercentage);
 
   const stats = {
     bookings_today: bookingsToday,
@@ -109,6 +165,7 @@ export default async function AdminDashboardPage() {
       status,
       scheduled_time_start,
       total_amount,
+      city,
       user:profiles!bookings_user_id_fkey(full_name),
       detailer:detailers(full_name),
       service:services(name)
@@ -158,25 +215,90 @@ export default async function AdminDashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-5">
           <div className="text-[#C6CFD9] text-sm mb-1">Today's Bookings</div>
-          <div className="text-3xl font-bold text-white">{stats?.today?.total_bookings || 0}</div>
+          <div className="text-3xl font-bold text-white">{stats.bookings_today || 0}</div>
         </div>
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-5">
           <div className="text-[#C6CFD9] text-sm mb-1">Confirmed</div>
-          <div className="text-3xl font-bold text-cyan-400">{stats?.today?.confirmed || 0}</div>
+          <div className="text-3xl font-bold text-cyan-400">{stats.confirmed_today || 0}</div>
         </div>
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-5">
           <div className="text-[#C6CFD9] text-sm mb-1">In Progress</div>
-          <div className="text-3xl font-bold text-indigo-400">{stats?.today?.in_progress || 0}</div>
+          <div className="text-3xl font-bold text-indigo-400">{stats.in_progress_today || 0}</div>
         </div>
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-5">
           <div className="text-[#C6CFD9] text-sm mb-1">Completed</div>
-          <div className="text-3xl font-bold text-[#32CE7A]">{stats?.today?.completed || 0}</div>
+          <div className="text-3xl font-bold text-[#32CE7A]">{stats.completed_today || 0}</div>
         </div>
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-5">
           <div className="text-[#C6CFD9] text-sm mb-1">Today's Revenue</div>
-          <div className="text-3xl font-bold text-[#32CE7A]">${stats?.today?.revenue_gross || 0}</div>
+          <div className="text-3xl font-bold text-[#32CE7A]">${stats.revenue_today.toFixed(2) || 0}</div>
         </div>
       </div>
+
+      {/* Pending Applications Section */}
+      {pendingDetailers.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <svg className="w-5 h-5 text-yellow-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Pending Detailer Applications
+            </h2>
+            <Link 
+              href="/admin/detailers?status=pending" 
+              className="text-sm text-[#32CE7A] hover:text-[#6FF0C4] flex items-center gap-1"
+            >
+              View all ({pendingDetailers.length})
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+              </svg>
+            </Link>
+          </div>
+          <div className="bg-yellow-500/10 border-2 border-yellow-500/30 rounded-xl p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {pendingDetailers.map((detailer: any) => (
+                <Link
+                  key={detailer.id}
+                  href={`/admin/detailers/${detailer.id}`}
+                  className="bg-[#0A1A2F] border border-white/10 rounded-lg p-4 hover:border-yellow-500/50 transition-colors"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-12 h-12 rounded-full bg-[#32CE7A]/20 flex items-center justify-center flex-shrink-0">
+                      {detailer.avatar_url ? (
+                        <img src={detailer.avatar_url} alt="" className="w-12 h-12 rounded-full object-cover" />
+                      ) : (
+                        <span className="text-[#32CE7A] font-semibold text-lg">
+                          {detailer.full_name?.[0]?.toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-white font-semibold truncate">{detailer.full_name}</h3>
+                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                          Pending
+                        </span>
+                      </div>
+                      {detailer.profile?.email && (
+                        <div className="text-sm text-[#C6CFD9] truncate mb-1">{detailer.profile.email}</div>
+                      )}
+                      <div className="flex items-center gap-3 text-xs text-[#C6CFD9]">
+                        <span>{detailer.years_experience || 0} years exp.</span>
+                        <span>•</span>
+                        <span>{new Date(detailer.created_at).toLocaleDateString()}</span>
+                      </div>
+                      <div className="mt-2 text-xs text-[#32CE7A] font-medium">
+                        Review Application →
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Alerts Section */}
       {(stats?.alerts?.unassigned_soon > 0 || stats?.alerts?.failed_payments > 0 || stats?.alerts?.pending_refunds > 0) && (
@@ -251,9 +373,12 @@ export default async function AdminDashboardPage() {
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium text-white">{booking.scheduled_time_start?.slice(0, 5)}</span>
                         <span className="text-[#C6CFD9]">•</span>
-                        <span className="text-[#C6CFD9] truncate">{booking.customer?.full_name}</span>
+                        <span className="text-[#C6CFD9] truncate">{booking.user?.full_name || 'Customer'}</span>
                       </div>
-                      <div className="text-sm text-[#C6CFD9] mb-2">{booking.service?.name} • {booking.city}</div>
+                      <div className="text-sm text-[#C6CFD9] mb-2">
+                        {booking.service?.name || 'Service'}
+                        {booking.city && ` • ${booking.city}`}
+                      </div>
                       <div className="flex items-center gap-2">
                         <StatusBadge status={booking.status} />
                         {booking.detailer ? (
@@ -266,7 +391,7 @@ export default async function AdminDashboardPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-white">${booking.total_amount}</span>
+                      <span className="text-sm font-medium text-white">${parseFloat(booking.total_amount || '0').toFixed(2)}</span>
                       <Link
                         href={`/admin/bookings/${booking.id}`}
                         className="p-2 text-[#C6CFD9] hover:text-white hover:bg-white/10 rounded-lg transition-colors"
@@ -341,6 +466,21 @@ export default async function AdminDashboardPage() {
           <div className="text-[#C6CFD9] text-sm mb-1">Active Detailers</div>
           <div className="text-2xl font-bold text-white">{stats?.overall?.total_detailers || 0}</div>
         </div>
+        {pendingDetailers.length > 0 && (
+          <Link 
+            href="/admin/detailers?status=pending"
+            className="bg-yellow-500/10 border-2 border-yellow-500/30 rounded-xl p-5 hover:border-yellow-500/50 transition-colors"
+          >
+            <div className="text-[#C6CFD9] text-sm mb-1 flex items-center gap-2">
+              <svg className="w-4 h-4 text-yellow-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Pending Applications
+            </div>
+            <div className="text-2xl font-bold text-yellow-400">{pendingDetailers.length}</div>
+            <div className="text-xs text-[#C6CFD9] mt-1">Requires review</div>
+          </Link>
+        )}
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-5">
           <div className="text-[#C6CFD9] text-sm mb-1">This Month's Bookings</div>
           <div className="text-2xl font-bold text-white">{stats?.this_month?.bookings || 0}</div>

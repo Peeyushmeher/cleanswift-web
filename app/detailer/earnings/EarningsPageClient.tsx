@@ -20,6 +20,7 @@ interface EarningsPageClientProps {
   } | null;
   teamEarnings?: Array<{ name: string; revenue: number; jobs: number }>;
   payoutBatches?: any[];
+  platformFeePercentage?: number;
 }
 
 export default function EarningsPageClient({
@@ -30,6 +31,7 @@ export default function EarningsPageClient({
   orgEarnings,
   teamEarnings = [],
   payoutBatches = [],
+  platformFeePercentage = 15,
 }: EarningsPageClientProps) {
   const [period, setPeriod] = useState<'day' | 'week' | 'month'>('day');
 
@@ -120,7 +122,7 @@ export default function EarningsPageClient({
             <tbody className="divide-y divide-white/5">
               {earningsData.map((booking) => {
                 const amount = booking.total_amount || booking.service_price || 0;
-                const payout = amount * 0.9; // 10% platform fee
+                const payout = amount * (1 - platformFeePercentage / 100);
                 return (
                   <tr key={booking.id} className="hover:bg-white/5">
                     <td className="px-4 py-3 text-sm text-white">

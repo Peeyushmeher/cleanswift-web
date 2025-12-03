@@ -1,7 +1,8 @@
 import { requireDetailer, getDetailerMode } from '@/lib/auth';
 import { getDetailerOrganization, getOrganizationRole } from '@/lib/detailer/mode-detection';
 import { canAssignJobs } from '@/lib/detailer/permissions';
-import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
+import { getPlatformFeePercentage, calculatePlatformFee } from '@/lib/platform-settings';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import BookingDetailClient from './BookingDetailClient';
@@ -58,11 +59,9 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
     notFound();
   }
 
-  // Use service client to fetch full booking data with related tables
-  // This bypasses RLS since we've already verified access above
-  const serviceClient = createServiceClient();
-  
-  const { data: booking, error } = await serviceClient
+  // Fetch full booking data with related tables
+  // We've already verified access above, so RLS will allow this query
+  const { data: booking, error } = await supabase
     .from('bookings')
     .select(
       `
@@ -130,6 +129,11 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
     booking.status === 'accepted' || booking.status === 'in_progress' || booking.status === 'completed';
   const canReassign = mode === 'organization' && organization && orgRole && canAssignJobs(orgRole);
 
+  // Calculate platform fee for payment breakdown
+  const platformFeePercentage = await getPlatformFeePercentage();
+  const totalAmount = parseFloat(booking.total_amount || '0');
+  const platformFee = await calculatePlatformFee(totalAmount, platformFeePercentage);
+
   return (
     <div className="min-h-screen bg-[#050B12] text-white">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -148,6 +152,8 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
           canUpdateStatus={canUpdateStatus}
           canReassign={canReassign}
           organizationId={organization?.id}
+          platformFee={platformFee}
+          platformFeePercentage={platformFeePercentage}
         />
       </div>
     </div>

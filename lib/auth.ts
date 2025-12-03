@@ -13,30 +13,48 @@ export interface UserProfile {
 
 /**
  * Get the current user's session and profile
+ * Uses getUser() instead of getSession() for secure authentication
  */
 export async function getSession() {
   const supabase = await createClient();
   const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  
+  if (error || !user) {
+    return null;
+  }
+  
+  // Get session after verifying user for compatibility
+  const {
     data: { session },
   } = await supabase.auth.getSession();
+  
   return session;
 }
 
 /**
  * Get the current user's profile with role
+ * Uses getUser() for secure authentication
  */
 export async function getUserProfile(): Promise<UserProfile | null> {
   const supabase = await createClient();
-  const session = await getSession();
+  
+  // Use getUser() instead of getSession() for secure authentication
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
 
-  if (!session?.user) {
+  if (authError || !user) {
     return null;
   }
 
   const { data, error } = await supabase
     .from('profiles')
     .select('id, full_name, email, phone, role, avatar_url')
-    .eq('id', session.user.id)
+    .eq('id', user.id)
     .single();
 
   if (error) {
@@ -45,7 +63,7 @@ export async function getUserProfile(): Promise<UserProfile | null> {
   }
   
   if (!data) {
-    console.error('No profile found for user:', session.user.id);
+    console.error('No profile found for user:', user.id);
     return null;
   }
 
@@ -54,12 +72,24 @@ export async function getUserProfile(): Promise<UserProfile | null> {
 
 /**
  * Check if user is authenticated, redirect to login if not
+ * Uses getUser() for secure authentication
  */
 export async function requireAuth() {
-  const session = await getSession();
-  if (!session) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  
+  if (error || !user) {
     redirect('/auth/login');
   }
+  
+  // Get session for compatibility
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  
   return session;
 }
 
@@ -71,6 +101,56 @@ export async function requireDetailer() {
   if (!profile || (profile.role !== 'detailer' && profile.role !== 'admin')) {
     redirect('/auth/login');
   }
+  return profile;
+}
+
+/**
+ * Check if user is an active detailer (has detailer role and is_active=true)
+ * Redirects appropriately based on onboarding and approval status
+ */
+export async function requireActiveDetailer() {
+  const profile = await getUserProfile();
+  
+  if (!profile || (profile.role !== 'detailer' && profile.role !== 'admin')) {
+    redirect('/auth/login');
+  }
+
+  // Admins can always access
+  if (profile.role === 'admin') {
+    return profile;
+  }
+
+  const supabase = await createClient();
+  
+  // Check onboarding status
+  const { data: profileData } = await supabase
+    .from('profiles')
+    .select('onboarding_completed')
+    .eq('id', profile.id)
+    .single();
+
+  // If onboarding not completed, redirect to onboarding
+  if (!profileData?.onboarding_completed) {
+    redirect('/onboard');
+  }
+
+  // Check detailer active status
+  const { data: detailer } = await supabase
+    .from('detailers')
+    .select('is_active')
+    .eq('profile_id', profile.id)
+    .single();
+
+  // If no detailer record, redirect to onboarding
+  if (!detailer) {
+    redirect('/onboard');
+  }
+
+  // If detailer is not active, redirect to pending page
+  if (!detailer.is_active) {
+    redirect('/detailer/pending');
+  }
+
   return profile;
 }
 

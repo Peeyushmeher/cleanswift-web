@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import JobsTable from '@/components/detailer/JobsTable';
 import JobsFilters from '@/components/detailer/JobsFilters';
@@ -22,7 +22,14 @@ export default function JobsPageClient({
   detailers = [],
   organizationId
 }: JobsPageClientProps) {
-  const [filteredBookings, setFilteredBookings] = useState<Booking[]>(initialBookings);
+  const [filteredBookings, setFilteredBookings] = useState<Booking[]>([]);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Initialize filtered bookings on client side only to avoid hydration mismatch
+  useEffect(() => {
+    setIsMounted(true);
+    setFilteredBookings(initialBookings);
+  }, [initialBookings]);
   const [assignmentModalOpen, setAssignmentModalOpen] = useState(false);
   const [selectedBookingId, setSelectedBookingId] = useState<string>('');
   const [selectedCurrentDetailerId, setSelectedCurrentDetailerId] = useState<string | null>(null);
@@ -37,6 +44,15 @@ export default function JobsPageClient({
   const handleAssigned = () => {
     router.refresh();
   };
+
+  // Don't render until mounted to avoid hydration mismatch
+  if (!isMounted) {
+    return (
+      <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
+        <div className="text-center text-[#C6CFD9] py-8">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <>

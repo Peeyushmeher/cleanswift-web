@@ -1,4 +1,4 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { DeleteButton } from '@/components/admin/DeleteButton';
 
@@ -15,7 +15,7 @@ function StatusBadge({ isActive }: { isActive: boolean }) {
 }
 
 export default async function AdminServicesPage() {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
 
   // Get all services (including inactive ones for admin)
   const { data: services, error: servicesError } = await supabase
@@ -35,7 +35,7 @@ export default async function AdminServicesPage() {
   // Server Actions for Services
   async function createService(formData: FormData) {
     'use server';
-    const supabase = createServiceClient();
+    const supabase = await createClient();
     
     const name = formData.get('name') as string;
     const description = formData.get('description') as string;
@@ -66,7 +66,7 @@ export default async function AdminServicesPage() {
 
   async function updateService(formData: FormData) {
     'use server';
-    const supabase = createServiceClient();
+    const supabase = await createClient();
     
     const id = formData.get('id') as string;
     const name = formData.get('name') as string;
@@ -94,7 +94,7 @@ export default async function AdminServicesPage() {
 
   async function toggleService(formData: FormData) {
     'use server';
-    const supabase = createServiceClient();
+    const supabase = await createClient();
     
     const id = formData.get('id') as string;
     const currentStatus = formData.get('current_status') === 'true';
@@ -114,7 +114,7 @@ export default async function AdminServicesPage() {
 
   async function deleteService(formData: FormData) {
     'use server';
-    const supabase = createServiceClient();
+    const supabase = await createClient();
     
     const id = formData.get('id') as string;
     if (!id) return;
@@ -126,7 +126,7 @@ export default async function AdminServicesPage() {
   // Server Actions for Add-ons
   async function createAddon(formData: FormData) {
     'use server';
-    const supabase = createServiceClient();
+    const supabase = await createClient();
     
     const name = formData.get('name') as string;
     const description = formData.get('description') as string;
@@ -155,7 +155,7 @@ export default async function AdminServicesPage() {
 
   async function updateAddon(formData: FormData) {
     'use server';
-    const supabase = createServiceClient();
+    const supabase = await createClient();
     
     const id = formData.get('id') as string;
     const name = formData.get('name') as string;
@@ -181,7 +181,7 @@ export default async function AdminServicesPage() {
 
   async function toggleAddon(formData: FormData) {
     'use server';
-    const supabase = createServiceClient();
+    const supabase = await createClient();
     
     const id = formData.get('id') as string;
     const currentStatus = formData.get('current_status') === 'true';
@@ -201,7 +201,7 @@ export default async function AdminServicesPage() {
 
   async function deleteAddon(formData: FormData) {
     'use server';
-    const supabase = createServiceClient();
+    const supabase = await createClient();
     
     const id = formData.get('id') as string;
     if (!id) return;
