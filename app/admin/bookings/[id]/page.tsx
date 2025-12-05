@@ -85,12 +85,15 @@ export default async function AdminBookingDetailPage({ params }: { params: Promi
       latitude: bookingRaw.latitude || bookingRaw.location_lat,
       longitude: bookingRaw.longitude || bookingRaw.location_lng,
     },
-    addons: bookingAddons?.map(ba => ({
-      id: ba.id,
-      name: ba.addon?.name,
-      description: ba.addon?.description,
-      price: ba.price,
-    })) || [],
+    addons: bookingAddons?.map(ba => {
+      const addon = Array.isArray(ba.addon) ? ba.addon[0] : ba.addon;
+      return {
+        id: ba.id,
+        name: addon?.name,
+        description: addon?.description,
+        price: ba.price,
+      };
+    }) || [],
     notes: [], // Would need a booking_notes table
     audit_logs: [], // Would need to query admin_action_logs
   };
@@ -256,11 +259,13 @@ export default async function AdminBookingDetailPage({ params }: { params: Promi
     }
   }
 
-  // Calculate platform fee using configured percentage
-  const { getPlatformFeePercentage, calculatePlatformFee, calculateDetailerPayout } = await import('@/lib/platform-settings');
-  const platformFeePercent = await getPlatformFeePercentage();
-  const platformFee = await calculatePlatformFee(parseFloat(booking.total_amount || '0'), platformFeePercent);
-  const detailerPayout = await calculateDetailerPayout(parseFloat(booking.total_amount || '0'), platformFeePercent);
+  // Calculate platform fee using detailer's pricing model
+  const { calculatePlatformFee, calculateDetailerPayout } = await import('@/lib/platform-settings');
+  const detailerId = bookingRaw.detailer_id;
+  const totalAmount = parseFloat(booking.total_amount || '0');
+  const platformFee = await calculatePlatformFee(totalAmount, undefined, detailerId);
+  const detailerPayout = await calculateDetailerPayout(totalAmount, undefined, detailerId);
+  const platformFeePercent = totalAmount > 0 ? (platformFee / totalAmount) * 100 : 0;
 
   return (
     <div className="p-6 lg:p-8">

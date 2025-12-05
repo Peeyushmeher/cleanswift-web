@@ -132,7 +132,17 @@ export async function getBookingById(bookingId: string) {
     throw formatError('fetch booking', error?.message);
   }
 
-  return data as Booking;
+  // Transform relations from arrays to single objects
+  const transformed = {
+    ...data,
+    service: Array.isArray(data.service) ? data.service[0] : data.service,
+    car: Array.isArray(data.car) ? data.car[0] : data.car,
+    user: Array.isArray(data.user) ? data.user[0] : data.user,
+    detailer: Array.isArray(data.detailer) ? data.detailer[0] : data.detailer,
+    team: Array.isArray(data.team) ? data.team[0] : data.team,
+  };
+
+  return transformed as Booking;
 }
 
 // Commands

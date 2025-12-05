@@ -14,6 +14,19 @@ export interface AddressData {
   longitude?: number;
 }
 
+export interface AvailabilitySlot {
+  day_of_week: number; // 0=Sunday, 1=Monday, ..., 6=Saturday
+  start_time: string; // HH:mm:ss format
+  end_time: string; // HH:mm:ss format
+  lunch_start_time?: string; // HH:mm:ss format (optional)
+  lunch_end_time?: string; // HH:mm:ss format (optional)
+}
+
+export interface DayOff {
+  date: string; // YYYY-MM-DD format
+  reason?: string;
+}
+
 export interface DetailerOnboardingData {
   // Step 0: Account Information (for new users)
   email?: string;
@@ -28,10 +41,28 @@ export interface DetailerOnboardingData {
   address: AddressData;
   service_radius_km?: number;
   
-  // Step 3: Profile Details
+  // Step 3: Pricing Model
+  pricing_model?: 'subscription' | 'percentage' | null;
+  
+  // Step 4: Profile Details
   bio?: string;
   specialties?: string[];
   avatar_url?: string;
+  
+  // Step 5: Availability Hours
+  availability?: AvailabilitySlot[];
+  daysOff?: DayOff[];
+}
+
+export interface ServiceAreaZone {
+  name: string;
+  city: string;
+  province: string;
+  postal_codes?: string[];
+}
+
+export interface BusinessHours {
+  [key: string]: { start: string; end: string; active: boolean };
 }
 
 export interface OrganizationOnboardingData {
@@ -43,6 +74,8 @@ export interface OrganizationOnboardingData {
   organization_name: string;
   organization_description?: string;
   business_logo_url?: string;
+  service_area?: ServiceAreaZone[];
+  business_hours?: BusinessHours;
   
   // Owner detailer info (same as DetailerOnboardingData)
   owner_detailer: DetailerOnboardingData;
@@ -243,57 +276,170 @@ export async function createDetailerProfile(
     }
 
     // Step 3: Update detailer with additional fields (location, bio, specialties, service_radius, organization)
-    // Use service client if available, otherwise skip (can be updated later after email confirmation)
+    // Use service client to save all data regardless of authentication status
     const updateData: any = {};
     
-    if (data.address.latitude && data.address.longitude) {
+    // Always set service_radius_km (use actual value, default to 50 if not provided)
+    if (data.service_radius_km !== undefined && data.service_radius_km !== null) {
+      updateData.service_radius_km = data.service_radius_km;
+    } else {
+      updateData.service_radius_km = 50; // Default
+    }
+    
+    // Set location if address has coordinates
+    if (data.address?.latitude && data.address?.longitude) {
       updateData.latitude = data.address.latitude;
       updateData.longitude = data.address.longitude;
     }
     
-    if (data.service_radius_km) {
-      updateData.service_radius_km = data.service_radius_km;
+    // Set bio if provided
+    if (data.bio && data.bio.trim().length > 0) {
+      updateData.bio = data.bio.trim();
     }
     
-    if (data.bio) {
-      updateData.bio = data.bio;
-    }
-    
-    if (data.specialties && data.specialties.length > 0) {
+    // Set specialties if provided
+    if (data.specialties && Array.isArray(data.specialties) && data.specialties.length > 0) {
       updateData.specialties = data.specialties;
     }
+    
+    // Set pricing model if provided
+    if (data.pricing_model) {
+      updateData.pricing_model = data.pricing_model;
+    }
 
+    // Set organization if provided
     if (organizationId) {
       updateData.organization_id = organizationId;
     }
-
-    // Try to update detailer if we have a session, otherwise skip (can be updated after email confirmation)
-    if (Object.keys(updateData).length > 0 && currentUser) {
-      const { error: updateError } = await supabase
-        .from('detailers')
-        .update(updateData)
-        .eq('id', detailer.id);
-
-      if (updateError) {
-        console.error('Error updating detailer additional fields:', updateError);
-        // Don't fail the whole operation, these can be updated later
+    
+    console.log('Prepared updateData for detailer:', {
+      detailerId: detailer.id,
+      updateData,
+      hasAddress: !!data.address,
+      addressData: data.address,
+      formData: {
+        service_radius_km: data.service_radius_km,
+        bio: data.bio,
+        specialties: data.specialties,
+        pricing_model: data.pricing_model,
       }
-    } else if (Object.keys(updateData).length > 0) {
-      console.warn('Skipping detailer field updates - user not authenticated (email confirmation required). These can be updated after email confirmation.');
-    }
+    });
 
-    // Step 4: Create user address (only if authenticated, otherwise skip)
-    if (currentUser) {
-      const addressResult = await createUserAddress(data.address, 'Home');
-      if (!addressResult.success) {
-        console.error('Error creating user address:', addressResult.error);
-        // Don't fail the whole operation, address can be added later
+    // Use service client to update detailer fields (bypasses RLS, works without authentication)
+    if (Object.keys(updateData).length > 0) {
+      try {
+        const serviceClient = createServiceClient();
+        console.log('Updating detailer with data:', { detailerId: detailer.id, updateData });
+        const { data: updatedDetailer, error: updateError } = await serviceClient
+          .from('detailers')
+          .update(updateData)
+          .eq('id', detailer.id)
+          .select();
+
+        if (updateError) {
+          console.error('Error updating detailer additional fields:', updateError);
+          // Don't fail the whole operation, these can be updated later
+        } else {
+          console.log('Successfully updated detailer:', updatedDetailer);
+        }
+      } catch (serviceError: any) {
+        console.error('Error creating service client for detailer update:', serviceError);
+        console.error('Service error details:', serviceError?.message, serviceError?.stack);
+        // Don't fail the whole operation
       }
     } else {
-      console.warn('Skipping address creation - user not authenticated (email confirmation required). Address can be added after email confirmation.');
+      console.warn('No update data to save for detailer:', detailer.id, 'Form data:', {
+        hasAddress: !!data.address,
+        hasSpecialties: !!(data.specialties && data.specialties.length > 0),
+        hasBio: !!data.bio,
+        serviceRadius: data.service_radius_km,
+      });
     }
 
-    // Step 5: Mark onboarding as completed using RPC (works without session)
+    // Step 4: Create user address using service client (bypasses RLS, works without authentication)
+    try {
+      const serviceClient = createServiceClient();
+      
+      // Geocode address if not provided
+      let { latitude, longitude } = data.address;
+      if (!latitude || !longitude) {
+        const geocoded = await geocodeAddress(data.address);
+        if (geocoded) {
+          latitude = geocoded.latitude;
+          longitude = geocoded.longitude;
+        }
+      }
+
+      const addressData = {
+        user_id: user.id, // This is the profile_id (profiles.id = auth.users.id)
+        name: 'Home',
+        address_line1: data.address.address_line1,
+        address_line2: data.address.address_line2 || null,
+        city: data.address.city,
+        province: data.address.province,
+        postal_code: data.address.postal_code,
+        latitude: latitude || null,
+        longitude: longitude || null,
+        is_default: true, // First address from onboarding is default
+      };
+
+      console.log('Creating user address with data:', { userId: user.id, addressData });
+      const { data: createdAddress, error: addressError } = await serviceClient
+        .from('user_addresses')
+        .insert(addressData)
+        .select();
+
+      if (addressError) {
+        console.error('Error creating user address:', addressError);
+        // Don't fail the whole operation, address can be added later
+      } else {
+        console.log('Successfully created user address:', createdAddress);
+      }
+    } catch (serviceError: any) {
+      console.error('Error creating service client for address creation:', serviceError);
+      console.error('Service error details:', serviceError?.message, serviceError?.stack);
+      // Don't fail the whole operation
+    }
+
+    // Step 5: Create availability records if provided (only if authenticated)
+    if (data.availability && data.availability.length > 0 && currentUser) {
+      for (const slot of data.availability) {
+        const { error: availabilityError } = await supabase.rpc('set_detailer_availability', {
+          p_day_of_week: slot.day_of_week,
+          p_start_time: slot.start_time,
+          p_end_time: slot.end_time,
+          p_is_active: true,
+          p_lunch_start_time: slot.lunch_start_time || null,
+          p_lunch_end_time: slot.lunch_end_time || null,
+        });
+
+        if (availabilityError) {
+          console.error('Error creating availability slot:', availabilityError);
+          // Don't fail the whole operation, availability can be added later
+        }
+      }
+    } else if (data.availability && data.availability.length > 0) {
+      console.warn('Skipping availability creation - user not authenticated (email confirmation required). Availability can be added after email confirmation.');
+    }
+
+    // Step 5b: Create days off records if provided (only if authenticated)
+    if (data.daysOff && data.daysOff.length > 0 && currentUser) {
+      for (const dayOff of data.daysOff) {
+        const { error: dayOffError } = await supabase.rpc('add_detailer_day_off', {
+          p_date: dayOff.date,
+          p_reason: dayOff.reason || null,
+        });
+
+        if (dayOffError) {
+          console.error('Error creating day off:', dayOffError);
+          // Don't fail the whole operation, days off can be added later
+        }
+      }
+    } else if (data.daysOff && data.daysOff.length > 0) {
+      console.warn('Skipping days off creation - user not authenticated (email confirmation required). Days off can be added after email confirmation.');
+    }
+
+    // Step 6: Mark onboarding as completed using RPC (works without session)
     const { error: onboardingError } = await supabase.rpc('update_profile_onboarding_completed', {
       p_user_id: user.id,
     });
@@ -396,13 +542,19 @@ export async function createOrganization(
       return { success: false, error: 'Failed to create organization' };
     }
 
-    // Step 2: Update organization with description and logo if provided
+    // Step 2: Update organization with description, logo, service_area, and business_hours if provided
     const orgUpdateData: any = {};
     if (data.organization_description) {
       orgUpdateData.description = data.organization_description;
     }
     if (data.business_logo_url) {
       orgUpdateData.business_logo_url = data.business_logo_url;
+    }
+    if (data.service_area && data.service_area.length > 0) {
+      orgUpdateData.service_area = data.service_area;
+    }
+    if (data.business_hours && Object.keys(data.business_hours).length > 0) {
+      orgUpdateData.business_hours = data.business_hours;
     }
 
     if (Object.keys(orgUpdateData).length > 0) {

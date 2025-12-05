@@ -4,7 +4,8 @@ import { getDetailerOrganization, getOrganizationRole } from '@/lib/detailer/mod
 import { redirect } from 'next/navigation';
 import TeamDetailClient from './TeamDetailClient';
 
-export default async function TeamDetailPage({ params }: { params: { id: string } }) {
+export default async function TeamDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const profile = await requireDetailer();
   const mode = await getDetailerMode();
 
@@ -36,7 +37,7 @@ export default async function TeamDetailPage({ params }: { params: { id: string 
         )
       )
     `)
-    .eq('id', params.id)
+    .eq('id', id)
     .eq('organization_id', organization.id)
     .single();
 
@@ -48,7 +49,7 @@ export default async function TeamDetailPage({ params }: { params: { id: string 
   const { data: bookings } = await supabase
     .from('bookings')
     .select('id, receipt_id, status, total_amount, scheduled_date, service:service_id (name)')
-    .eq('team_id', params.id)
+    .eq('team_id', id)
     .order('scheduled_date', { ascending: false })
     .limit(20);
 

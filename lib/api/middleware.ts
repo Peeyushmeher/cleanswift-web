@@ -1,5 +1,3 @@
-'use server';
-
 import type { UserProfile } from '@/lib/auth';
 import { getUserProfile } from '@/lib/auth';
 

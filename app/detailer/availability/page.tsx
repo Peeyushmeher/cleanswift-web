@@ -9,6 +9,15 @@ interface AvailabilitySlot {
   day_of_week: number;
   start_time: string;
   end_time: string;
+  lunch_start_time?: string | null;
+  lunch_end_time?: string | null;
+  is_active: boolean;
+}
+
+interface DayOff {
+  id: string;
+  date: string;
+  reason?: string | null;
   is_active: boolean;
 }
 
@@ -30,11 +39,14 @@ const PERMISSION_ERRORS = [
 
 export default function AvailabilityPage() {
   const [availability, setAvailability] = useState<AvailabilitySlot[]>([]);
+  const [daysOff, setDaysOff] = useState<DayOff[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [hasDetailerRecord, setHasDetailerRecord] = useState(true);
+  const [newDayOffDate, setNewDayOffDate] = useState('');
+  const [newDayOffReason, setNewDayOffReason] = useState('');
   const router = useRouter();
   const supabase = createClient();
 
@@ -119,6 +131,21 @@ export default function AvailabilityPage() {
       }
       
       setAvailability(data || []);
+
+      // Fetch days off
+      const { data: daysOffData, error: daysOffError } = await supabase.rpc('get_detailer_days_off');
+
+      if (daysOffError) {
+        // Handle permission errors by redirecting
+        if (isPermissionError(daysOffError.message)) {
+          router.push('/auth/login');
+          return;
+        }
+        console.error('Error fetching days off:', daysOffError);
+        // Don't fail the whole operation
+      } else {
+        setDaysOff(daysOffData || []);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load availability';
       
@@ -193,7 +220,7 @@ export default function AvailabilityPage() {
     }
   };
 
-  const handleTimeChange = async (dayOfWeek: number, field: 'start_time' | 'end_time', value: string) => {
+  const handleTimeChange = async (dayOfWeek: number, field: 'start_time' | 'end_time' | 'lunch_start_time' | 'lunch_end_time', value: string) => {
     try {
       setSaving(true);
       setError(null);
@@ -206,6 +233,8 @@ export default function AvailabilityPage() {
         p_start_time: field === 'start_time' ? timeValue : existingSlot?.start_time || '09:00:00',
         p_end_time: field === 'end_time' ? timeValue : existingSlot?.end_time || '17:00:00',
         p_is_active: existingSlot?.is_active ?? true,
+        p_lunch_start_time: field === 'lunch_start_time' ? timeValue : (field === 'lunch_end_time' ? existingSlot?.lunch_start_time : existingSlot?.lunch_start_time) || null,
+        p_lunch_end_time: field === 'lunch_end_time' ? timeValue : (field === 'lunch_start_time' ? existingSlot?.lunch_end_time : existingSlot?.lunch_end_time) || null,
       });
 
       if (updateError) {
@@ -218,6 +247,110 @@ export default function AvailabilityPage() {
       await fetchAvailability();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update time';
+      if (isPermissionError(errorMessage)) {
+        router.push('/auth/login');
+        return;
+      }
+      setError(errorMessage);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLunchBreakToggle = async (dayOfWeek: number) => {
+    try {
+      setSaving(true);
+      setError(null);
+
+      const existingSlot = availability.find((slot) => slot.day_of_week === dayOfWeek);
+      if (!existingSlot) return;
+
+      const hasLunchBreak = existingSlot.lunch_start_time && existingSlot.lunch_end_time;
+
+      const { error: updateError } = await supabase.rpc('set_detailer_availability', {
+        p_day_of_week: dayOfWeek,
+        p_start_time: existingSlot.start_time,
+        p_end_time: existingSlot.end_time,
+        p_is_active: existingSlot.is_active,
+        p_lunch_start_time: hasLunchBreak ? null : '12:00:00',
+        p_lunch_end_time: hasLunchBreak ? null : '13:00:00',
+      });
+
+      if (updateError) {
+        if (isPermissionError(updateError.message)) {
+          router.push('/auth/login');
+          return;
+        }
+        throw updateError;
+      }
+      await fetchAvailability();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to update lunch break';
+      if (isPermissionError(errorMessage)) {
+        router.push('/auth/login');
+        return;
+      }
+      setError(errorMessage);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddDayOff = async () => {
+    if (!newDayOffDate) return;
+
+    try {
+      setSaving(true);
+      setError(null);
+
+      const { error: addError } = await supabase.rpc('add_detailer_day_off', {
+        p_date: newDayOffDate,
+        p_reason: newDayOffReason || null,
+      });
+
+      if (addError) {
+        if (isPermissionError(addError.message)) {
+          router.push('/auth/login');
+          return;
+        }
+        throw addError;
+      }
+
+      setNewDayOffDate('');
+      setNewDayOffReason('');
+      await fetchAvailability();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to add day off';
+      if (isPermissionError(errorMessage)) {
+        router.push('/auth/login');
+        return;
+      }
+      setError(errorMessage);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemoveDayOff = async (date: string) => {
+    try {
+      setSaving(true);
+      setError(null);
+
+      const { error: removeError } = await supabase.rpc('remove_detailer_day_off', {
+        p_date: date,
+      });
+
+      if (removeError) {
+        if (isPermissionError(removeError.message)) {
+          router.push('/auth/login');
+          return;
+        }
+        throw removeError;
+      }
+
+      await fetchAvailability();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to remove day off';
       if (isPermissionError(errorMessage)) {
         router.push('/auth/login');
         return;
@@ -296,37 +429,75 @@ export default function AvailabilityPage() {
               return (
                 <div
                   key={index}
-                  className="flex items-center justify-between p-4 bg-[#050B12] border border-white/5 rounded-lg"
+                  className="p-4 bg-[#050B12] border border-white/5 rounded-lg"
                 >
-                  <div className="flex items-center gap-4">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={isActive}
-                        onChange={() => handleToggleDay(index)}
-                        disabled={saving}
-                        className="w-5 h-5 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A]"
-                      />
-                      <span className="text-white font-medium w-24">{dayName}</span>
-                    </label>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-3 cursor-pointer flex-shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={isActive}
+                          onChange={() => handleToggleDay(index)}
+                          disabled={saving}
+                          className="w-5 h-5 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A]"
+                        />
+                        <span className="text-white font-medium w-24">{dayName}</span>
+                      </label>
 
+                      {isActive && (
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <input
+                            type="time"
+                            value={slot ? formatTime(slot.start_time) : '09:00'}
+                            onChange={(e) => handleTimeChange(index, 'start_time', e.target.value)}
+                            disabled={saving}
+                            className="px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
+                          />
+                          <span className="text-[#C6CFD9]">to</span>
+                          <input
+                            type="time"
+                            value={slot ? formatTime(slot.end_time) : '17:00'}
+                            onChange={(e) => handleTimeChange(index, 'end_time', e.target.value)}
+                            disabled={saving}
+                            className="px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Lunch Break Section - Always on its own line when active */}
                     {isActive && (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="time"
-                          value={slot ? formatTime(slot.start_time) : '09:00'}
-                          onChange={(e) => handleTimeChange(index, 'start_time', e.target.value)}
-                          disabled={saving}
-                          className="px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
-                        />
-                        <span className="text-[#C6CFD9]">to</span>
-                        <input
-                          type="time"
-                          value={slot ? formatTime(slot.end_time) : '17:00'}
-                          onChange={(e) => handleTimeChange(index, 'end_time', e.target.value)}
-                          disabled={saving}
-                          className="px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
-                        />
+                      <div className="flex items-center gap-2 pl-8">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!(slot?.lunch_start_time && slot?.lunch_end_time)}
+                            onChange={() => handleLunchBreakToggle(index)}
+                            disabled={saving}
+                            className="w-4 h-4 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A]"
+                          />
+                          <span className="text-[#C6CFD9] text-xs">Lunch</span>
+                        </label>
+                        
+                        {slot?.lunch_start_time && slot?.lunch_end_time && (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="time"
+                              value={formatTime(slot.lunch_start_time)}
+                              onChange={(e) => handleTimeChange(index, 'lunch_start_time', e.target.value)}
+                              disabled={saving}
+                              className="px-2 py-1 bg-[#0A1A2F] border border-white/10 rounded text-white text-xs focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
+                            />
+                            <span className="text-[#C6CFD9] text-xs">-</span>
+                            <input
+                              type="time"
+                              value={formatTime(slot.lunch_end_time)}
+                              onChange={(e) => handleTimeChange(index, 'lunch_end_time', e.target.value)}
+                              disabled={saving}
+                              className="px-2 py-1 bg-[#0A1A2F] border border-white/10 rounded text-white text-xs focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -337,6 +508,81 @@ export default function AvailabilityPage() {
 
           {saving && (
             <div className="mt-4 text-[#C6CFD9] text-sm">Saving changes...</div>
+          )}
+        </div>
+
+        {/* Days Off Section */}
+        <div className="mt-8 bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-semibold text-white mb-1">Days Off</h2>
+              <p className="text-[#C6CFD9] text-sm">Mark specific dates as unavailable (holidays, vacations, etc.)</p>
+            </div>
+          </div>
+
+          {/* Add Day Off Form */}
+          <div className="mb-6 p-4 bg-[#050B12] border border-white/5 rounded-lg">
+            <div className="flex items-center gap-3">
+              <input
+                type="date"
+                value={newDayOffDate}
+                onChange={(e) => setNewDayOffDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
+                disabled={saving}
+                className="px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
+                placeholder="Select date"
+              />
+              <input
+                type="text"
+                value={newDayOffReason}
+                onChange={(e) => setNewDayOffReason(e.target.value)}
+                disabled={saving}
+                className="flex-1 px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
+                placeholder="Reason (optional)"
+              />
+              <button
+                onClick={handleAddDayOff}
+                disabled={saving || !newDayOffDate}
+                className="px-4 py-2 bg-[#32CE7A] hover:bg-[#2AB869] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          {/* Days Off List */}
+          {daysOff.length === 0 ? (
+            <p className="text-[#C6CFD9] text-sm italic">No days off added</p>
+          ) : (
+            <div className="space-y-2">
+              {daysOff.map((dayOff) => (
+                <div
+                  key={dayOff.id}
+                  className="flex items-center justify-between p-3 bg-[#050B12] border border-white/5 rounded-lg"
+                >
+                  <div className="flex items-center gap-4">
+                    <span className="text-white font-medium">
+                      {new Date(dayOff.date).toLocaleDateString('en-US', { 
+                        weekday: 'long', 
+                        year: 'numeric', 
+                        month: 'long', 
+                        day: 'numeric' 
+                      })}
+                    </span>
+                    {dayOff.reason && (
+                      <span className="text-[#C6CFD9] text-sm">({dayOff.reason})</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleRemoveDayOff(dayOff.date)}
+                    disabled={saving}
+                    className="px-3 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>

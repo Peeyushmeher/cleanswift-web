@@ -38,13 +38,28 @@ export default async function AdminFinancePage({
   // Get all bookings for stats
   const { data: allBookings } = await supabase
     .from('bookings')
-    .select('payment_status, total_amount');
+    .select('id, payment_status, total_amount');
 
   const paidBookings = allBookings?.filter(b => b.payment_status === 'paid') || [];
   const totalRevenue = paidBookings.reduce((sum, b) => sum + parseFloat(b.total_amount || '0'), 0);
-  const platformFeePercentage = await getPlatformFeePercentage();
-  const platformFees = await calculatePlatformFee(totalRevenue, platformFeePercentage);
-  const detailerPayouts = await calculateDetailerPayout(totalRevenue, platformFeePercentage);
+  
+  // Calculate platform fees per booking based on each detailer's pricing model
+  let totalPlatformFees = 0;
+  for (const booking of paidBookings) {
+    const amount = parseFloat(booking.total_amount || '0');
+    // Get detailer_id from booking - need to fetch it
+    const { data: bookingWithDetailer } = await supabase
+      .from('bookings')
+      .select('detailer_id')
+      .eq('id', booking.id)
+      .single();
+    const detailerId = bookingWithDetailer?.detailer_id;
+    const fee = await calculatePlatformFee(amount, undefined, detailerId);
+    totalPlatformFees += fee;
+  }
+  
+  const platformFees = totalPlatformFees;
+  const detailerPayouts = totalRevenue - platformFees;
 
   const stats = {
     total_revenue: totalRevenue.toFixed(2),
@@ -81,10 +96,17 @@ export default async function AdminFinancePage({
 
   const { data: transactionsRaw } = await query;
 
-  // Calculate platform fees and payouts for each transaction
-  const transactions = (transactionsRaw || []).map((tx: any) => {
+  // Calculate platform fees and payouts for each transaction based on detailer's pricing model
+  const transactions = await Promise.all((transactionsRaw || []).map(async (tx: any) => {
     const amount = parseFloat(tx.total_amount || '0');
-    const fee = (amount * platformFeePercentage) / 100;
+    // Get detailer_id from the booking
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('detailer_id')
+      .eq('id', tx.id)
+      .single();
+    const detailerId = booking?.detailer_id;
+    const fee = await calculatePlatformFee(amount, undefined, detailerId);
     const payout = amount - fee;
     return {
       ...tx,
@@ -92,7 +114,7 @@ export default async function AdminFinancePage({
       platform_fee: fee.toFixed(2),
       detailer_payout: payout.toFixed(2),
     };
-  });
+  }));
 
   return (
     <div className="p-6 lg:p-8">
@@ -131,16 +153,16 @@ export default async function AdminFinancePage({
         </div>
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-4">
           <div className="text-[#C6CFD9] text-sm">Platform Earnings</div>
-          <div className="text-2xl font-bold text-white">${stats?.platform_earnings || 0}</div>
+          <div className="text-2xl font-bold text-white">${stats?.platform_fees || 0}</div>
         </div>
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-4">
           <div className="text-[#C6CFD9] text-sm">This Month</div>
-          <div className="text-2xl font-bold text-[#32CE7A]">${stats?.this_month?.revenue || 0}</div>
-          <div className="text-xs text-[#C6CFD9]">{stats?.this_month?.transactions || 0} transactions</div>
+          <div className="text-2xl font-bold text-[#32CE7A]">$0</div>
+          <div className="text-xs text-[#C6CFD9]">0 transactions</div>
         </div>
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-4">
           <div className="text-[#C6CFD9] text-sm">Last Month</div>
-          <div className="text-2xl font-bold text-white">${stats?.last_month?.revenue || 0}</div>
+          <div className="text-2xl font-bold text-white">$0</div>
         </div>
       </div>
 
@@ -150,7 +172,7 @@ export default async function AdminFinancePage({
           <Link
             href="/admin/finance"
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              !searchParams.status
+              !params.status
                 ? 'bg-[#32CE7A] text-white'
                 : 'bg-[#050B12] text-[#C6CFD9] hover:bg-white/5 border border-white/10'
             }`}
@@ -160,7 +182,7 @@ export default async function AdminFinancePage({
           <Link
             href="/admin/finance?status=paid"
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              searchParams.status === 'paid'
+              params.status === 'paid'
                 ? 'bg-[#32CE7A] text-white'
                 : 'bg-[#050B12] text-[#C6CFD9] hover:bg-white/5 border border-white/10'
             }`}
@@ -170,7 +192,7 @@ export default async function AdminFinancePage({
           <Link
             href="/admin/finance?status=refunded"
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              searchParams.status === 'refunded'
+              params.status === 'refunded'
                 ? 'bg-[#32CE7A] text-white'
                 : 'bg-[#050B12] text-[#C6CFD9] hover:bg-white/5 border border-white/10'
             }`}
@@ -180,7 +202,7 @@ export default async function AdminFinancePage({
           <Link
             href="/admin/finance?status=failed"
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              searchParams.status === 'failed'
+              params.status === 'failed'
                 ? 'bg-[#32CE7A] text-white'
                 : 'bg-[#050B12] text-[#C6CFD9] hover:bg-white/5 border border-white/10'
             }`}

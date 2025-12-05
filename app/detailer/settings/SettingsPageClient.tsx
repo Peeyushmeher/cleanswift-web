@@ -8,12 +8,14 @@ interface SettingsPageClientProps {
   profile: any;
   serviceAreas: any[];
   notificationSettings: any;
+  detailer?: any;
 }
 
 export default function SettingsPageClient({
   profile,
   serviceAreas,
   notificationSettings,
+  detailer,
 }: SettingsPageClientProps) {
   const router = useRouter();
   const supabase = createClient();
@@ -189,6 +191,95 @@ export default function SettingsPageClient({
           </label>
         </div>
       </div>
+
+      {/* Pricing Model */}
+      {detailer && (
+        <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
+          <h2 className="text-xl font-semibold text-white mb-4">Pricing Model</h2>
+          <div className="space-y-4">
+            <div>
+              <p className="text-[#C6CFD9] mb-2">Current Model</p>
+              <p className="text-white font-medium">
+                {detailer.pricing_model === 'subscription' 
+                  ? 'Monthly Subscription ($29.99/month)' 
+                  : detailer.pricing_model === 'percentage'
+                  ? 'Pay Per Booking (15% platform fee)'
+                  : 'Pay Per Booking (15% platform fee) - Default'}
+              </p>
+              {detailer.stripe_subscription_id && (
+                <p className="text-sm text-[#C6CFD9] mt-1">
+                  Subscription Active
+                </p>
+              )}
+            </div>
+            <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-lg">
+              <p className="text-sm text-cyan-300">
+                <strong>Note:</strong> Changing your pricing model will affect future bookings. 
+                If switching to subscription, a monthly charge will begin. 
+                If switching from subscription, your current subscription will be cancelled.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={async () => {
+                  if (!confirm('Are you sure you want to switch to Monthly Subscription? This will start a $29.99/month charge.')) {
+                    return;
+                  }
+                  try {
+                    const response = await fetch('/api/detailer/switch-pricing-model', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ pricing_model: 'subscription' }),
+                    });
+                    if (response.ok) {
+                      router.refresh();
+                      alert('Pricing model updated successfully!');
+                    } else {
+                      const error = await response.json();
+                      alert(error.error || 'Failed to update pricing model');
+                    }
+                  } catch (error) {
+                    console.error('Error switching pricing model:', error);
+                    alert('Failed to update pricing model');
+                  }
+                }}
+                disabled={detailer.pricing_model === 'subscription'}
+                className="px-4 py-2 bg-[#32CE7A] hover:bg-[#2AB869] text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Switch to Subscription
+              </button>
+              <button
+                onClick={async () => {
+                  if (!confirm('Are you sure you want to switch to Pay Per Booking? Your current subscription will be cancelled.')) {
+                    return;
+                  }
+                  try {
+                    const response = await fetch('/api/detailer/switch-pricing-model', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ pricing_model: 'percentage' }),
+                    });
+                    if (response.ok) {
+                      router.refresh();
+                      alert('Pricing model updated successfully!');
+                    } else {
+                      const error = await response.json();
+                      alert(error.error || 'Failed to update pricing model');
+                    }
+                  } catch (error) {
+                    console.error('Error switching pricing model:', error);
+                    alert('Failed to update pricing model');
+                  }
+                }}
+                disabled={detailer.pricing_model === 'percentage'}
+                className="px-4 py-2 bg-[#32CE7A] hover:bg-[#2AB869] text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Switch to Pay Per Booking
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stripe Connect Status */}
       <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">

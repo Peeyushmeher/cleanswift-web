@@ -60,6 +60,7 @@ export default async function SettingsPage() {
           profile={profile}
           serviceAreas={serviceAreas}
           notificationSettings={notificationSettings}
+          detailer={detailerData}
         />
       </div>
     </div>

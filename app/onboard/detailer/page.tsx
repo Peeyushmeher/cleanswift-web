@@ -10,8 +10,10 @@ import AddressForm from '@/app/components/onboard/AddressForm';
 import SpecialtiesSelector from '@/app/components/onboard/SpecialtiesSelector';
 import PendingApprovalMessage from '@/app/components/onboard/PendingApprovalMessage';
 import { createDetailerProfile, type DetailerOnboardingData, type AddressData } from '@/app/onboard/actions';
+import AvailabilitySelector from '@/app/components/onboard/AvailabilitySelector';
+import PricingModelSelector from '@/app/components/onboard/PricingModelSelector';
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 6;
 
 export default function SoloDetailerOnboardingPage() {
   const router = useRouter();
@@ -35,6 +37,9 @@ export default function SoloDetailerOnboardingPage() {
     service_radius_km: 50,
     bio: '',
     specialties: [],
+    availability: [],
+    daysOff: [],
+    pricing_model: null,
   });
   const [errors, setErrors] = useState<Partial<Record<string, string>>>({});
 
@@ -43,26 +48,12 @@ export default function SoloDetailerOnboardingPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setIsLoggedIn(true);
-        // Fetch existing profile data if available
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name, phone, email')
-          .eq('id', user.id)
-          .single();
-        
-        if (profile) {
-          setFormData(prev => ({
-            ...prev,
-            email: profile.email || user.email || '',
-            full_name: profile.full_name || '',
-            phone: profile.phone || '',
-          }));
-        } else {
-          setFormData(prev => ({
-            ...prev,
-            email: user.email || '',
-          }));
-        }
+        // Only pre-fill email for logged-in users, but NOT name, phone, or other fields
+        // Users should enter their own information during onboarding
+        setFormData(prev => ({
+          ...prev,
+          email: user.email || '',
+        }));
       } else {
         setIsLoggedIn(false);
       }
@@ -110,6 +101,30 @@ export default function SoloDetailerOnboardingPage() {
       if (!formData.address.postal_code.trim()) {
         newErrors['address.postal_code'] = 'Postal code is required';
       }
+      // Validate that lat/lng is captured (required for distance-based matching)
+      if (!formData.address.latitude || !formData.address.longitude) {
+        newErrors['address.location'] = 'Please select your address from the autocomplete suggestions to enable location-based matching';
+      }
+      // Validate service radius
+      if (!formData.service_radius_km || formData.service_radius_km < 1) {
+        newErrors['service_radius_km'] = 'Service radius must be at least 1 km';
+      }
+      if (formData.service_radius_km && formData.service_radius_km > 200) {
+        newErrors['service_radius_km'] = 'Service radius cannot exceed 200 km';
+      }
+    } else if (step === 3) {
+      if (!formData.pricing_model) {
+        newErrors.pricing_model = 'Please select a pricing model';
+      }
+    } else if (step === 5) {
+      // Availability is optional, but if provided, validate times
+      if (formData.availability && formData.availability.length > 0) {
+        formData.availability.forEach((slot, index) => {
+          if (slot.end_time <= slot.start_time) {
+            newErrors[`availability.${index}`] = 'End time must be after start time';
+          }
+        });
+      }
     }
 
     setErrors(newErrors);
@@ -131,7 +146,7 @@ export default function SoloDetailerOnboardingPage() {
   };
 
   const handleSubmit = async () => {
-    if (!validateStep(4)) {
+    if (!validateStep(6)) {
       return;
     }
 
@@ -308,7 +323,12 @@ export default function SoloDetailerOnboardingPage() {
               !!formData.address.address_line1 &&
               !!formData.address.city &&
               !!formData.address.province &&
-              !!formData.address.postal_code
+              !!formData.address.postal_code &&
+              !!formData.address.latitude &&
+              !!formData.address.longitude &&
+              !!formData.service_radius_km &&
+              formData.service_radius_km >= 1 &&
+              formData.service_radius_km <= 200
             }
             isSubmitting={isSubmitting}
           >
@@ -321,24 +341,50 @@ export default function SoloDetailerOnboardingPage() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Service Radius (km) <span className="text-slate-500">(optional)</span>
+                  Max Travel Radius (km) <span className="text-red-400">*</span>
                 </label>
                 <input
                   type="number"
                   min="1"
                   max="200"
+                  required
                   className="input"
                   placeholder="50"
                   value={formData.service_radius_km || ''}
                   onChange={(e) => setFormData({ ...formData, service_radius_km: parseInt(e.target.value) || 50 })}
                 />
-                <p className="text-slate-500 text-xs mt-1">Default: 50km. How far are you willing to travel for bookings?</p>
+                <p className="text-slate-500 text-xs mt-1">How far are you willing to travel from your home base? This determines which bookings you'll be matched with.</p>
+                {errors['service_radius_km'] && (
+                  <p className="text-red-400 text-sm mt-1">{errors['service_radius_km']}</p>
+                )}
+                {errors['address.location'] && (
+                  <p className="text-red-400 text-sm mt-1">{errors['address.location']}</p>
+                )}
               </div>
             </div>
           </OnboardingStep>
         )}
 
         {currentStep === 3 && (
+          <OnboardingStep
+            currentStep={currentStep}
+            totalSteps={TOTAL_STEPS}
+            title="Pricing Model"
+            description="Choose how you want to pay the platform"
+            onNext={handleNext}
+            onBack={handleBack}
+            canProceed={!!formData.pricing_model}
+            isSubmitting={isSubmitting}
+          >
+            <PricingModelSelector
+              selected={formData.pricing_model ?? null}
+              onChange={(model) => setFormData({ ...formData, pricing_model: model })}
+              errors={errors}
+            />
+          </OnboardingStep>
+        )}
+
+        {currentStep === 4 && (
           <OnboardingStep
             currentStep={currentStep}
             totalSteps={TOTAL_STEPS}
@@ -370,7 +416,36 @@ export default function SoloDetailerOnboardingPage() {
           </OnboardingStep>
         )}
 
-        {currentStep === 4 && (
+        {currentStep === 5 && (
+          <OnboardingStep
+            currentStep={currentStep}
+            totalSteps={TOTAL_STEPS}
+            title="Availability Hours"
+            description="When are you available to work? Jobs will only be assigned during these hours."
+            onNext={handleNext}
+            onBack={handleBack}
+            isSubmitting={isSubmitting}
+          >
+            <div className="space-y-6">
+              <div className="p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+                <p className="text-sm text-cyan-300">
+                  <strong>Note:</strong> Select the days and times you&apos;re available to work. 
+                  You can update this later in your settings.
+                </p>
+              </div>
+
+              <AvailabilitySelector
+                value={formData.availability || []}
+                onChange={(availability) => setFormData({ ...formData, availability })}
+                daysOff={formData.daysOff || []}
+                onDaysOffChange={(daysOff) => setFormData({ ...formData, daysOff })}
+                errors={errors}
+              />
+            </div>
+          </OnboardingStep>
+        )}
+
+        {currentStep === 6 && (
           <OnboardingStep
             currentStep={currentStep}
             totalSteps={TOTAL_STEPS}
@@ -425,6 +500,22 @@ export default function SoloDetailerOnboardingPage() {
               </div>
 
               <div className="p-6 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                <h3 className="font-semibold mb-4">Pricing Model</h3>
+                <dl className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">Model:</dt>
+                    <dd className="font-medium">
+                      {formData.pricing_model === 'subscription' 
+                        ? 'Monthly Subscription ($29.99/month)' 
+                        : formData.pricing_model === 'percentage'
+                        ? 'Pay Per Booking (15% platform fee)'
+                        : 'Not selected'}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="p-6 rounded-lg bg-slate-800/50 border border-slate-700/50">
                 <h3 className="font-semibold mb-4">Profile Details</h3>
                 <dl className="space-y-2 text-sm">
                   {formData.bio && (
@@ -443,6 +534,25 @@ export default function SoloDetailerOnboardingPage() {
                   )}
                 </dl>
               </div>
+
+              {formData.availability && formData.availability.length > 0 && (
+                <div className="p-6 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                  <h3 className="font-semibold mb-4">Availability Hours</h3>
+                  <dl className="space-y-2 text-sm">
+                    {formData.availability.map((slot) => {
+                      const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                      const startTime = slot.start_time.substring(0, 5);
+                      const endTime = slot.end_time.substring(0, 5);
+                      return (
+                        <div key={slot.day_of_week} className="flex justify-between">
+                          <dt className="text-slate-400">{DAY_NAMES[slot.day_of_week]}:</dt>
+                          <dd className="font-medium">{startTime} - {endTime}</dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
+                </div>
+              )}
 
               {errors.submit && (
                 <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">

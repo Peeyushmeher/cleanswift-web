@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { getPlatformFeePercentage, calculatePlatformFee } from '@/lib/platform-settings';
 import Link from 'next/link';
+import DetailerAvailabilityViewer from '@/components/admin/DetailerAvailabilityViewer';
 
 // Status badge component
 function StatusBadge({ status }: { status: string }) {
@@ -97,6 +98,13 @@ export default async function AdminDashboardPage() {
     console.error('Error fetching detailers for dashboard:', detailersError);
   }
 
+  // Get active detailers for availability viewer
+  const { data: activeDetailers } = await supabase
+    .from('detailers')
+    .select('id, full_name')
+    .eq('is_active', true)
+    .order('full_name');
+
   // Get profiles to check onboarding status
   let pendingDetailers: any[] = [];
   
@@ -139,9 +147,22 @@ export default async function AdminDashboardPage() {
   console.log('Dashboard - Inactive detailers found:', allDetailers?.length || 0);
   console.log('Dashboard - Pending detailers (after filtering):', pendingDetailers.length);
 
-  // Calculate platform earnings using configured fee percentage
-  const platformFeePercentage = await getPlatformFeePercentage();
-  const platformEarningsToday = await calculatePlatformFee(revenueToday, platformFeePercentage);
+  // Calculate platform earnings - for aggregate view, we'll calculate per booking
+  // Get today's paid bookings with detailer IDs
+  const { data: paidBookingsToday } = await supabase
+    .from('bookings')
+    .select('id, total_amount, detailer_id')
+    .eq('payment_status', 'paid')
+    .gte('created_at', new Date().toISOString().split('T')[0]);
+  
+  let platformEarningsToday = 0;
+  if (paidBookingsToday) {
+    for (const booking of paidBookingsToday) {
+      const amount = parseFloat(booking.total_amount || '0');
+      const fee = await calculatePlatformFee(amount, undefined, booking.detailer_id);
+      platformEarningsToday += fee;
+    }
+  }
 
   const stats = {
     bookings_today: bookingsToday,
@@ -188,13 +209,16 @@ export default async function AdminDashboardPage() {
     .order('created_at', { ascending: false })
     .limit(20);
 
-  const recentActivity = recentBookings?.map(b => ({
-    event_type: 'booking_created',
-    description: `Booking ${b.receipt_id} - ${b.status}`,
-    actor_name: b.user?.full_name || 'Customer',
-    created_at: b.created_at,
-    entity_id: b.id,
-  })) || [];
+  const recentActivity = recentBookings?.map(b => {
+    const user = Array.isArray(b.user) ? b.user[0] : b.user;
+    return {
+      event_type: 'booking_created',
+      description: `Booking ${b.receipt_id} - ${b.status}`,
+      actor_name: user?.full_name || 'Customer',
+      created_at: b.created_at,
+      entity_id: b.id,
+    };
+  }) || [];
 
   return (
     <div className="p-6 lg:p-8">
@@ -301,7 +325,7 @@ export default async function AdminDashboardPage() {
       )}
 
       {/* Alerts Section */}
-      {(stats?.alerts?.unassigned_soon > 0 || stats?.alerts?.failed_payments > 0 || stats?.alerts?.pending_refunds > 0) && (
+      {(stats?.unassigned_urgent > 0 || stats?.failed_payments > 0 || stats?.pending_refunds > 0) && (
         <div className="mb-8">
           <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <svg className="w-5 h-5 text-yellow-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -312,7 +336,7 @@ export default async function AdminDashboardPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <AlertCard
               title="Unassigned (< 2hrs)"
-              count={stats?.alerts?.unassigned_soon || 0}
+              count={stats?.unassigned_urgent || 0}
               color="bg-orange-500/10 border-orange-500/30 text-orange-400"
               href="/admin/bookings?filter=unassigned"
               icon={
@@ -323,7 +347,7 @@ export default async function AdminDashboardPage() {
             />
             <AlertCard
               title="Failed Payments"
-              count={stats?.alerts?.failed_payments || 0}
+              count={stats?.failed_payments || 0}
               color="bg-red-500/10 border-red-500/30 text-red-400"
               href="/admin/finance?filter=failed"
               icon={
@@ -334,7 +358,7 @@ export default async function AdminDashboardPage() {
             />
             <AlertCard
               title="Pending Refunds"
-              count={stats?.alerts?.pending_refunds || 0}
+              count={stats?.pending_refunds || 0}
               color="bg-purple-500/10 border-purple-500/30 text-purple-400"
               href="/admin/finance/refunds"
               icon={
@@ -456,15 +480,20 @@ export default async function AdminDashboardPage() {
         </div>
       </div>
 
+      {/* Detailer Availability Viewer */}
+      <div className="mt-8">
+        <DetailerAvailabilityViewer detailers={activeDetailers || []} />
+      </div>
+
       {/* Overall Stats */}
       <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-5">
           <div className="text-[#C6CFD9] text-sm mb-1">Total Customers</div>
-          <div className="text-2xl font-bold text-white">{stats?.overall?.total_customers || 0}</div>
+          <div className="text-2xl font-bold text-white">0</div>
         </div>
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-5">
           <div className="text-[#C6CFD9] text-sm mb-1">Active Detailers</div>
-          <div className="text-2xl font-bold text-white">{stats?.overall?.total_detailers || 0}</div>
+          <div className="text-2xl font-bold text-white">0</div>
         </div>
         {pendingDetailers.length > 0 && (
           <Link 
@@ -483,11 +512,11 @@ export default async function AdminDashboardPage() {
         )}
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-5">
           <div className="text-[#C6CFD9] text-sm mb-1">This Month's Bookings</div>
-          <div className="text-2xl font-bold text-white">{stats?.this_month?.bookings || 0}</div>
+          <div className="text-2xl font-bold text-white">0</div>
         </div>
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-5">
           <div className="text-[#C6CFD9] text-sm mb-1">This Month's Revenue</div>
-          <div className="text-2xl font-bold text-[#32CE7A]">${stats?.this_month?.revenue || 0}</div>
+          <div className="text-2xl font-bold text-[#32CE7A]">$0</div>
         </div>
       </div>
     </div>

@@ -138,28 +138,61 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
     // Process event based on type
-    const paymentIntent = event.data.object as Stripe.PaymentIntent;
-    const bookingId = paymentIntent.metadata?.booking_id;
-    const userId = paymentIntent.metadata?.user_id;
-
-    console.log('PaymentIntent ID:', paymentIntent.id);
-    console.log('Booking ID from metadata:', bookingId);
-    console.log('User ID from metadata:', userId);
-    console.log('PaymentIntent status:', paymentIntent.status);
-    console.log('Amount:', paymentIntent.amount, 'cents');
-    console.log('Currency:', paymentIntent.currency);
-
     switch (event.type) {
       case 'payment_intent.succeeded':
-        await handlePaymentIntentSucceeded(supabase, paymentIntent, bookingId, userId);
+        {
+          const paymentIntent = event.data.object as Stripe.PaymentIntent;
+          const bookingId = paymentIntent.metadata?.booking_id;
+          const userId = paymentIntent.metadata?.user_id;
+          await handlePaymentIntentSucceeded(supabase, paymentIntent, bookingId, userId);
+        }
         break;
 
       case 'payment_intent.payment_failed':
-        await handlePaymentIntentFailed(supabase, paymentIntent, bookingId, userId);
+        {
+          const paymentIntent = event.data.object as Stripe.PaymentIntent;
+          const bookingId = paymentIntent.metadata?.booking_id;
+          const userId = paymentIntent.metadata?.user_id;
+          await handlePaymentIntentFailed(supabase, paymentIntent, bookingId, userId);
+        }
         break;
 
       case 'payment_intent.canceled':
-        await handlePaymentIntentCanceled(supabase, paymentIntent, bookingId, userId);
+        {
+          const paymentIntent = event.data.object as Stripe.PaymentIntent;
+          const bookingId = paymentIntent.metadata?.booking_id;
+          const userId = paymentIntent.metadata?.user_id;
+          await handlePaymentIntentCanceled(supabase, paymentIntent, bookingId, userId);
+        }
+        break;
+
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+        {
+          const subscription = event.data.object as Stripe.Subscription;
+          await handleSubscriptionUpdated(supabase, subscription);
+        }
+        break;
+
+      case 'customer.subscription.deleted':
+        {
+          const subscription = event.data.object as Stripe.Subscription;
+          await handleSubscriptionDeleted(supabase, subscription);
+        }
+        break;
+
+      case 'invoice.payment_succeeded':
+        {
+          const invoice = event.data.object as Stripe.Invoice;
+          await handleInvoicePaymentSucceeded(supabase, invoice);
+        }
+        break;
+
+      case 'invoice.payment_failed':
+        {
+          const invoice = event.data.object as Stripe.Invoice;
+          await handleInvoicePaymentFailed(supabase, invoice);
+        }
         break;
 
       default:
@@ -496,5 +529,155 @@ async function handlePaymentIntentCanceled(
   }
 
   console.log('✅ Successfully processed payment_intent.canceled');
+}
+
+/**
+ * Handle customer.subscription.created and customer.subscription.updated events
+ * - Update detailer's stripe_subscription_id if not already set
+ * - Update subscription status if needed
+ */
+async function handleSubscriptionUpdated(
+  supabase: ReturnType<typeof createClient>,
+  subscription: Stripe.Subscription
+) {
+  console.log('🟢 Processing customer.subscription.updated/created');
+  console.log('Subscription ID:', subscription.id);
+  console.log('Customer ID:', subscription.customer);
+  console.log('Status:', subscription.status);
+
+  const detailerId = subscription.metadata?.detailer_id;
+  if (!detailerId) {
+    console.log('ℹ️  Subscription does not have detailer_id in metadata, skipping');
+    return;
+  }
+
+  // Update detailer with subscription ID if not already set
+  const { error: updateError } = await supabase
+    .from('detailers')
+    .update({
+      stripe_subscription_id: subscription.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', detailerId)
+    .is('stripe_subscription_id', null); // Only update if not already set
+
+  if (updateError) {
+    console.error('❌ Failed to update detailer subscription:', updateError);
+  } else {
+    console.log('✅ Updated detailer subscription ID');
+  }
+}
+
+/**
+ * Handle customer.subscription.deleted event
+ * - Clear stripe_subscription_id from detailer record
+ * - Optionally handle subscription cancellation logic
+ */
+async function handleSubscriptionDeleted(
+  supabase: ReturnType<typeof createClient>,
+  subscription: Stripe.Subscription
+) {
+  console.log('🔴 Processing customer.subscription.deleted');
+  console.log('Subscription ID:', subscription.id);
+  console.log('Customer ID:', subscription.customer);
+
+  const detailerId = subscription.metadata?.detailer_id;
+  if (!detailerId) {
+    console.log('ℹ️  Subscription does not have detailer_id in metadata, skipping');
+    return;
+  }
+
+  // Clear subscription ID from detailer
+  const { error: updateError } = await supabase
+    .from('detailers')
+    .update({
+      stripe_subscription_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', detailerId);
+
+  if (updateError) {
+    console.error('❌ Failed to clear detailer subscription:', updateError);
+  } else {
+    console.log('✅ Cleared detailer subscription ID');
+  }
+}
+
+/**
+ * Handle invoice.payment_succeeded event
+ * - Log successful subscription payment
+ * - Optionally update detailer status or send notifications
+ */
+async function handleInvoicePaymentSucceeded(
+  supabase: ReturnType<typeof createClient>,
+  invoice: Stripe.Invoice
+) {
+  console.log('🟢 Processing invoice.payment_succeeded');
+  console.log('Invoice ID:', invoice.id);
+  console.log('Subscription ID:', invoice.subscription);
+  console.log('Amount:', invoice.amount_paid, 'cents');
+
+  const subscriptionId = typeof invoice.subscription === 'string' 
+    ? invoice.subscription 
+    : invoice.subscription?.id;
+
+  if (!subscriptionId) {
+    console.log('ℹ️  Invoice does not have subscription, skipping');
+    return;
+  }
+
+  // Find detailer by subscription ID
+  const { data: detailer, error: detailerError } = await supabase
+    .from('detailers')
+    .select('id, full_name')
+    .eq('stripe_subscription_id', subscriptionId)
+    .single();
+
+  if (detailerError || !detailer) {
+    console.log('ℹ️  Detailer not found for subscription:', subscriptionId);
+    return;
+  }
+
+  console.log(`✅ Subscription payment succeeded for detailer: ${detailer.full_name} (${detailer.id})`);
+  // Additional logic can be added here (e.g., notifications, logging)
+}
+
+/**
+ * Handle invoice.payment_failed event
+ * - Log failed subscription payment
+ * - Optionally update detailer status or send notifications
+ */
+async function handleInvoicePaymentFailed(
+  supabase: ReturnType<typeof createClient>,
+  invoice: Stripe.Invoice
+) {
+  console.log('🔴 Processing invoice.payment_failed');
+  console.log('Invoice ID:', invoice.id);
+  console.log('Subscription ID:', invoice.subscription);
+  console.log('Amount:', invoice.amount_due, 'cents');
+
+  const subscriptionId = typeof invoice.subscription === 'string' 
+    ? invoice.subscription 
+    : invoice.subscription?.id;
+
+  if (!subscriptionId) {
+    console.log('ℹ️  Invoice does not have subscription, skipping');
+    return;
+  }
+
+  // Find detailer by subscription ID
+  const { data: detailer, error: detailerError } = await supabase
+    .from('detailers')
+    .select('id, full_name')
+    .eq('stripe_subscription_id', subscriptionId)
+    .single();
+
+  if (detailerError || !detailer) {
+    console.log('ℹ️  Detailer not found for subscription:', subscriptionId);
+    return;
+  }
+
+  console.log(`⚠️  Subscription payment failed for detailer: ${detailer.full_name} (${detailer.id})`);
+  // Additional logic can be added here (e.g., notifications, status updates)
 }
 

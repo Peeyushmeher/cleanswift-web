@@ -162,6 +162,9 @@ export default async function AdminDetailerProfilePage({ params }: { params: Pro
     'use server';
     const supabase = await createClient();
     
+    // Get detailer ID from form data to ensure we have it in server action context
+    const detailerId = formData.get('detailer_id') as string || id;
+    
     // Verify admin access
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -173,14 +176,46 @@ export default async function AdminDetailerProfilePage({ params }: { params: Pro
       .from('profiles')
       .select('role')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
     if (profile?.role !== 'admin') {
       console.error('Only admins can update detailers');
       return;
     }
     
-    const newStatus = !detailerWithData.is_active;
+    // Get detailer's current state before updating (for subscription creation and status calculation)
+    const { data: detailerBeforeUpdate, error: fetchError } = await supabase
+      .from('detailers')
+      .select('pricing_model, is_active, profile_id')
+      .eq('id', detailerId)
+      .maybeSingle();
+    
+    if (fetchError) {
+      console.error('Error fetching detailer before update:', fetchError);
+      return;
+    }
+    
+    if (!detailerBeforeUpdate) {
+      console.error('Detailer not found');
+      return;
+    }
+    
+    // Check if profile has completed onboarding to determine if this is an approval
+    let profileOnboardingCompleted = false;
+    if (detailerBeforeUpdate.profile_id) {
+      const { data: detailerProfile } = await supabase
+        .from('profiles')
+        .select('onboarding_completed')
+        .eq('id', detailerBeforeUpdate.profile_id)
+        .maybeSingle();
+      
+      profileOnboardingCompleted = detailerProfile?.onboarding_completed || false;
+    }
+    
+    // Calculate new status and whether this is an approval
+    const newStatus = !detailerBeforeUpdate.is_active;
+    const isPending = profileOnboardingCompleted && !detailerBeforeUpdate.is_active;
+    const isApproving = newStatus && isPending;
     
     // Update detailer directly (we're already verified as admin)
     const { data: updatedDetailer, error } = await supabase
@@ -189,9 +224,9 @@ export default async function AdminDetailerProfilePage({ params }: { params: Pro
         is_active: newStatus,
         updated_at: new Date().toISOString()
       })
-      .eq('id', id)
+      .eq('id', detailerId)
       .select()
-      .single();
+      .maybeSingle();
     
     if (error) {
       console.error('Error updating detailer status:', error);
@@ -204,11 +239,43 @@ export default async function AdminDetailerProfilePage({ params }: { params: Pro
     }
     
     // Verify the update succeeded
-    console.log('Detailer status updated:', { id, is_active: updatedDetailer.is_active });
+    console.log('Detailer status updated:', { id: detailerId, is_active: updatedDetailer.is_active });
+    
+    // If approving a detailer with subscription pricing model, create Stripe subscription
+    if (isApproving && detailerBeforeUpdate?.pricing_model === 'subscription') {
+      try {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (!supabaseUrl) {
+          console.error('NEXT_PUBLIC_SUPABASE_URL not configured');
+        } else {
+          const functionUrl = `${supabaseUrl}/functions/v1/create-detailer-subscription`;
+          const response = await fetch(functionUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+            },
+            body: JSON.stringify({ detailer_id: detailerId }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            console.error('Failed to create subscription:', errorData);
+            // Don't fail the approval - subscription can be created manually later
+          } else {
+            const result = await response.json();
+            console.log('Subscription created successfully:', result);
+          }
+        }
+      } catch (subscriptionError) {
+        console.error('Error creating subscription:', subscriptionError);
+        // Don't fail the approval - subscription can be created manually later
+      }
+    }
     
     // Revalidate all relevant paths to ensure UI updates
     // Use 'layout' type to revalidate the entire route segment
-    revalidatePath(`/admin/detailers/${id}`, 'layout');
+    revalidatePath(`/admin/detailers/${detailerId}`, 'layout');
     revalidatePath('/admin/detailers', 'layout');
     revalidatePath('/admin/dashboard', 'layout');
     
@@ -337,6 +404,7 @@ export default async function AdminDetailerProfilePage({ params }: { params: Pro
           </div>
 
           <form action={toggleStatus}>
+            <input type="hidden" name="detailer_id" value={id} />
             <button
               type="submit"
               className={`px-6 py-3 rounded-lg font-medium transition-colors ${
@@ -661,6 +729,7 @@ export default async function AdminDetailerProfilePage({ params }: { params: Pro
                 Review all information above. Once approved, this detailer will be able to access their dashboard and start receiving bookings.
               </p>
               <form action={toggleStatus}>
+                <input type="hidden" name="detailer_id" value={id} />
                 <button
                   type="submit"
                   className="w-full px-4 py-3 bg-[#32CE7A] hover:bg-[#2AB869] text-white font-semibold rounded-lg transition-colors shadow-lg shadow-[#32CE7A]/20"

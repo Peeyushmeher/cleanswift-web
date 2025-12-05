@@ -51,8 +51,28 @@ export default async function EarningsPage() {
 
     const completedBookings = orgBookings || [];
     const grossRevenue = completedBookings.reduce((sum, b) => sum + (b.total_amount || b.service_price || 0), 0);
-    const platformFeePercentage = await getPlatformFeePercentage();
-    const platformFee = await calculatePlatformFee(grossRevenue, platformFeePercentage);
+    
+    // Calculate platform fee per booking based on each detailer's pricing model
+    // For org view, we'll use an average or aggregate approach
+    // Get unique detailer IDs to calculate fees properly
+    const detailerIds = [...new Set(completedBookings.map((b: any) => b.detailer_id).filter(Boolean))];
+    let totalPlatformFee = 0;
+    
+    // Calculate fee for each booking based on its detailer's pricing model
+    for (const booking of completedBookings) {
+      const bookingAmount = booking.total_amount || booking.service_price || 0;
+      const detailerId = booking.detailer_id;
+      if (detailerId) {
+        const fee = await calculatePlatformFee(bookingAmount, undefined, detailerId);
+        totalPlatformFee += fee;
+      } else {
+        // Fallback to standard fee if no detailer
+        const fee = await calculatePlatformFee(bookingAmount);
+        totalPlatformFee += fee;
+      }
+    }
+    
+    const platformFee = totalPlatformFee;
     const netRevenue = grossRevenue - platformFee;
 
     orgEarnings = {
@@ -111,8 +131,8 @@ export default async function EarningsPage() {
 
     earningsData = bookings || [];
     totalEarnings = earningsData.reduce((sum, b) => sum + (b.total_amount || b.service_price || 0), 0);
-    const platformFeePercentage = await getPlatformFeePercentage();
-    pendingPayouts = await calculateDetailerPayout(totalEarnings, platformFeePercentage);
+    // Use detailer-specific platform fee calculation
+    pendingPayouts = await calculateDetailerPayout(totalEarnings, undefined, detailerData.id);
   }
 
   return (

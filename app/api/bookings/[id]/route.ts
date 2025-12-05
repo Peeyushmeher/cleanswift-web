@@ -1,20 +1,13 @@
-'use server';
-
 import { NextRequest, NextResponse } from 'next/server';
 
 import { mapApiError, requireApiAdmin } from '@/lib/api/middleware';
 import { getBookingById } from '@/lib/services/bookings';
 
-interface RouteParams {
-  params: {
-    id: string;
-  };
-}
-
-export async function GET(_request: NextRequest, { params }: RouteParams) {
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireApiAdmin();
-    const booking = await getBookingById(params.id);
+    const { id } = await params;
+    const booking = await getBookingById(id);
     return NextResponse.json({ data: booking });
   } catch (error) {
     const { status, body } = mapApiError(error);

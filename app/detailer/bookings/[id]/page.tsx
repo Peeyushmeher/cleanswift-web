@@ -129,10 +129,11 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
     booking.status === 'accepted' || booking.status === 'in_progress' || booking.status === 'completed';
   const canReassign = mode === 'organization' && organization && orgRole && canAssignJobs(orgRole);
 
-  // Calculate platform fee for payment breakdown
-  const platformFeePercentage = await getPlatformFeePercentage();
+  // Calculate platform fee for payment breakdown using detailer's pricing model
   const totalAmount = parseFloat(booking.total_amount || '0');
-  const platformFee = await calculatePlatformFee(totalAmount, platformFeePercentage);
+  const detailerId = booking.detailer_id || detailerData?.id;
+  const platformFee = await calculatePlatformFee(totalAmount, undefined, detailerId);
+  const platformFeePercentage = totalAmount > 0 ? (platformFee / totalAmount) * 100 : 0;
 
   return (
     <div className="min-h-screen bg-[#050B12] text-white">

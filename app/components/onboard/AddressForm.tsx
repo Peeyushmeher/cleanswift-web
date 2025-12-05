@@ -282,9 +282,9 @@ export default function AddressForm({ value, onChange, errors }: AddressFormProp
         )}
       </div>
 
-      <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700/50">
-        <p className="text-sm text-slate-400">
-          <strong className="text-slate-300">Note:</strong> We&apos;ll use this address to calculate your service area and match you with nearby bookings. You can update this later in your settings.
+      <div className="p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+        <p className="text-sm text-cyan-300">
+          <strong>Important:</strong> Please select your address from the autocomplete suggestions (start typing your address). This ensures we can accurately calculate distances and match you with nearby bookings. You can update this later in your settings.
         </p>
       </div>
     </div>

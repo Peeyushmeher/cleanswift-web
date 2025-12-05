@@ -4,7 +4,8 @@ import { getDetailerOrganization, getOrganizationRole } from '@/lib/detailer/mod
 import { redirect } from 'next/navigation';
 import MemberDetailClient from './MemberDetailClient';
 
-export default async function MemberDetailPage({ params }: { params: { id: string } }) {
+export default async function MemberDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const profile = await requireDetailer();
   const mode = await getDetailerMode();
 
@@ -26,7 +27,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
     p_organization_id: organization.id,
   });
 
-  const member = members?.find((m: any) => m.profile_id === params.id);
+  const member = members?.find((m: any) => m.profile_id === id);
 
   if (!member) {
     redirect('/detailer/members');
@@ -36,7 +37,7 @@ export default async function MemberDetailPage({ params }: { params: { id: strin
   const { data: detailerRecord } = await supabase
     .from('detailers')
     .select('id')
-    .eq('profile_id', params.id)
+    .eq('profile_id', id)
     .single();
 
   let teams: any[] = [];

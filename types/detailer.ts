@@ -143,6 +143,9 @@ export interface Detailer {
   review_count: number;
   years_experience: number;
   is_active: boolean;
+  pricing_model?: 'subscription' | 'percentage' | null;
+  stripe_subscription_id?: string | null;
+  stripe_customer_id?: string | null;
 }
 
 export interface EarningsSummary {

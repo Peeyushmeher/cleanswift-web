@@ -9,7 +9,8 @@ import OnboardingStep from '@/app/components/onboard/OnboardingStep';
 import AddressForm from '@/app/components/onboard/AddressForm';
 import SpecialtiesSelector from '@/app/components/onboard/SpecialtiesSelector';
 import PendingApprovalMessage from '@/app/components/onboard/PendingApprovalMessage';
-import { createOrganization, type OrganizationOnboardingData, type DetailerOnboardingData, type AddressData } from '@/app/onboard/actions';
+import { createOrganization, type OrganizationOnboardingData, type DetailerOnboardingData, type AddressData, type ServiceAreaZone, type BusinessHours } from '@/app/onboard/actions';
+import AvailabilitySelector from '@/app/components/onboard/AvailabilitySelector';
 
 const TOTAL_STEPS = 4;
 
@@ -24,6 +25,8 @@ export default function OrganizationOnboardingPage() {
     organization_name: '',
     organization_description: '',
     business_logo_url: '',
+    service_area: [],
+    business_hours: {},
     owner_detailer: {
       full_name: '',
       phone: '',
@@ -46,23 +49,8 @@ export default function OrganizationOnboardingPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setUserEmail(user.email || '');
-        // Fetch existing profile data if available
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name, phone')
-          .eq('id', user.id)
-          .single();
-        
-        if (profile) {
-          setFormData(prev => ({
-            ...prev,
-            owner_detailer: {
-              ...prev.owner_detailer,
-              full_name: profile.full_name || '',
-              phone: profile.phone || '',
-            },
-          }));
-        }
+        // Don't pre-fill owner detailer information - users should enter their own data during onboarding
+        // Only the email is shown (read-only) since it's tied to their account
       }
     }
     fetchUser();
@@ -98,6 +86,17 @@ export default function OrganizationOnboardingPage() {
       }
       if (!formData.owner_detailer.address.postal_code.trim()) {
         newErrors['owner_detailer.address.postal_code'] = 'Postal code is required';
+      }
+      // Validate that lat/lng is captured (required for distance-based matching)
+      if (!formData.owner_detailer.address.latitude || !formData.owner_detailer.address.longitude) {
+        newErrors['owner_detailer.address.location'] = 'Please select your address from the autocomplete suggestions to enable location-based matching';
+      }
+      // Validate service radius
+      if (!formData.owner_detailer.service_radius_km || formData.owner_detailer.service_radius_km < 1) {
+        newErrors['owner_detailer.service_radius_km'] = 'Service radius must be at least 1 km';
+      }
+      if (formData.owner_detailer.service_radius_km && formData.owner_detailer.service_radius_km > 200) {
+        newErrors['owner_detailer.service_radius_km'] = 'Service radius cannot exceed 200 km';
       }
     }
 
@@ -225,24 +224,155 @@ export default function OrganizationOnboardingPage() {
             currentStep={currentStep}
             totalSteps={TOTAL_STEPS}
             title="Service Area & Hours"
-            description="Define your organization's service coverage"
+            description="Define your organization's service coverage and business hours"
             onNext={handleNext}
             onBack={handleBack}
             isSubmitting={isSubmitting}
           >
-            <div className="space-y-6">
-              <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700/50">
-                <p className="text-sm text-slate-400">
-                  <strong className="text-slate-300">Note:</strong> Service area zones and business hours can be configured after your organization is created. 
-                  For now, we&apos;ll use the owner&apos;s location and service radius.
+            <div className="space-y-8">
+              {/* Service Area Section */}
+              <div>
+                <h3 className="text-lg font-semibold mb-4">Service Areas <span className="text-slate-500 text-sm font-normal">(optional)</span></h3>
+                <p className="text-sm text-slate-400 mb-4">
+                  Define the areas where your organization provides services. You can add multiple zones.
                 </p>
+                
+                <div className="space-y-4">
+                  {(formData.service_area || []).map((zone, index) => (
+                    <div key={index} className="p-4 bg-slate-800/50 border border-slate-700/50 rounded-lg space-y-3">
+                      <div className="flex justify-between items-start">
+                        <h4 className="font-medium text-white">Zone {index + 1}</h4>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newZones = [...(formData.service_area || [])];
+                            newZones.splice(index, 1);
+                            setFormData({ ...formData, service_area: newZones });
+                          }}
+                          className="text-red-400 hover:text-red-300 text-sm"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Zone Name</label>
+                          <input
+                            type="text"
+                            className="input"
+                            placeholder="Downtown Toronto"
+                            value={zone.name}
+                            onChange={(e) => {
+                              const newZones = [...(formData.service_area || [])];
+                              newZones[index] = { ...zone, name: e.target.value };
+                              setFormData({ ...formData, service_area: newZones });
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">City</label>
+                          <input
+                            type="text"
+                            className="input"
+                            placeholder="Toronto"
+                            value={zone.city}
+                            onChange={(e) => {
+                              const newZones = [...(formData.service_area || [])];
+                              newZones[index] = { ...zone, city: e.target.value };
+                              setFormData({ ...formData, service_area: newZones });
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Province</label>
+                          <input
+                            type="text"
+                            className="input"
+                            placeholder="ON"
+                            value={zone.province}
+                            onChange={(e) => {
+                              const newZones = [...(formData.service_area || [])];
+                              newZones[index] = { ...zone, province: e.target.value };
+                              setFormData({ ...formData, service_area: newZones });
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Postal Codes (comma-separated)</label>
+                          <input
+                            type="text"
+                            className="input"
+                            placeholder="M5H, M5J"
+                            value={zone.postal_codes?.join(', ') || ''}
+                            onChange={(e) => {
+                              const newZones = [...(formData.service_area || [])];
+                              const postalCodes = e.target.value.split(',').map(code => code.trim()).filter(Boolean);
+                              newZones[index] = { ...zone, postal_codes: postalCodes.length > 0 ? postalCodes : undefined };
+                              setFormData({ ...formData, service_area: newZones });
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newZones = [...(formData.service_area || []), { name: '', city: '', province: '' }];
+                      setFormData({ ...formData, service_area: newZones });
+                    }}
+                    className="w-full py-2 px-4 border border-slate-700 rounded-lg text-slate-300 hover:bg-slate-800/50 transition-colors"
+                  >
+                    + Add Service Zone
+                  </button>
+                </div>
               </div>
-              
-              <div className="p-6 rounded-lg bg-slate-800/50 border border-slate-700/50">
-                <h3 className="font-semibold mb-4">Coming Soon</h3>
-                <p className="text-sm text-slate-400">
-                  Advanced features like multiple service zones and business hours will be available in your organization settings after approval.
+
+              {/* Business Hours Section */}
+              <div>
+                <h3 className="text-lg font-semibold mb-4">Business Hours <span className="text-slate-500 text-sm font-normal">(optional)</span></h3>
+                <p className="text-sm text-slate-400 mb-4">
+                  Set your organization&apos;s default business hours. These can be adjusted later.
                 </p>
+                
+                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
+                  <AvailabilitySelector
+                    value={(formData.business_hours ? Object.entries(formData.business_hours)
+                      .filter(([_, hours]) => hours.active)
+                      .map(([day, hours], index) => {
+                        const dayMap: { [key: string]: number } = {
+                          monday: 1, tuesday: 2, wednesday: 3, thursday: 4,
+                          friday: 5, saturday: 6, sunday: 0
+                        };
+                        return {
+                          day_of_week: dayMap[day] ?? index,
+                          start_time: `${hours.start}:00`,
+                          end_time: `${hours.end}:00`,
+                        };
+                      }) : [])}
+                    onChange={(availability) => {
+                      const hours: BusinessHours = {};
+                      const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+                      availability.forEach(slot => {
+                        const dayName = dayNames[slot.day_of_week];
+                        hours[dayName] = {
+                          start: slot.start_time.substring(0, 5),
+                          end: slot.end_time.substring(0, 5),
+                          active: true,
+                        };
+                      });
+                      // Add inactive days
+                      dayNames.forEach(day => {
+                        if (!hours[day]) {
+                          hours[day] = { start: '09:00', end: '17:00', active: false };
+                        }
+                      });
+                      setFormData({ ...formData, business_hours: hours });
+                    }}
+                    errors={errors}
+                  />
+                </div>
               </div>
             </div>
           </OnboardingStep>
@@ -263,7 +393,12 @@ export default function OrganizationOnboardingPage() {
               !!formData.owner_detailer.address.address_line1 &&
               !!formData.owner_detailer.address.city &&
               !!formData.owner_detailer.address.province &&
-              !!formData.owner_detailer.address.postal_code
+              !!formData.owner_detailer.address.postal_code &&
+              !!formData.owner_detailer.address.latitude &&
+              !!formData.owner_detailer.address.longitude &&
+              !!formData.owner_detailer.service_radius_km &&
+              formData.owner_detailer.service_radius_km >= 1 &&
+              formData.owner_detailer.service_radius_km <= 200
             }
             isSubmitting={isSubmitting}
           >
@@ -354,12 +489,13 @@ export default function OrganizationOnboardingPage() {
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Service Radius (km) <span className="text-slate-500">(optional)</span>
+                  Max Travel Radius (km) <span className="text-red-400">*</span>
                 </label>
                 <input
                   type="number"
                   min="1"
                   max="200"
+                  required
                   className="input"
                   placeholder="50"
                   value={formData.owner_detailer.service_radius_km || ''}
@@ -368,6 +504,13 @@ export default function OrganizationOnboardingPage() {
                     owner_detailer: { ...formData.owner_detailer, service_radius_km: parseInt(e.target.value) || 50 }
                   })}
                 />
+                <p className="text-slate-500 text-xs mt-1">How far are you willing to travel from your home base? This determines which bookings you'll be matched with.</p>
+                {errors['owner_detailer.service_radius_km'] && (
+                  <p className="text-red-400 text-sm mt-1">{errors['owner_detailer.service_radius_km']}</p>
+                )}
+                {errors['owner_detailer.address.location'] && (
+                  <p className="text-red-400 text-sm mt-1">{errors['owner_detailer.address.location']}</p>
+                )}
               </div>
 
               <div>
@@ -420,6 +563,35 @@ export default function OrganizationOnboardingPage() {
                     <div>
                       <dt className="text-slate-400">Description:</dt>
                       <dd className="font-medium mt-1">{formData.organization_description}</dd>
+                    </div>
+                  )}
+                  {formData.service_area && formData.service_area.length > 0 && (
+                    <div>
+                      <dt className="text-slate-400">Service Areas:</dt>
+                      <dd className="font-medium mt-1">
+                        {formData.service_area.map((zone, idx) => (
+                          <div key={idx} className="mb-1">
+                            {zone.name} - {zone.city}, {zone.province}
+                            {zone.postal_codes && zone.postal_codes.length > 0 && (
+                              <span className="text-slate-500"> ({zone.postal_codes.join(', ')})</span>
+                            )}
+                          </div>
+                        ))}
+                      </dd>
+                    </div>
+                  )}
+                  {formData.business_hours && Object.values(formData.business_hours).some(h => h.active) && (
+                    <div>
+                      <dt className="text-slate-400">Business Hours:</dt>
+                      <dd className="font-medium mt-1">
+                        {Object.entries(formData.business_hours)
+                          .filter(([_, hours]) => hours.active)
+                          .map(([day, hours]) => (
+                            <div key={day} className="mb-1 capitalize">
+                              {day}: {hours.start} - {hours.end}
+                            </div>
+                          ))}
+                      </dd>
                     </div>
                   )}
                 </dl>

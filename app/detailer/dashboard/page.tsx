@@ -5,6 +5,7 @@ import CalendarView from './CalendarView';
 import StatsGrid from '@/components/detailer/StatsGrid';
 import TodaysJobsList from '@/components/detailer/TodaysJobsList';
 import EarningsChart from '@/components/detailer/EarningsChart';
+import AvailabilityCalendar from '@/components/detailer/AvailabilityCalendar';
 import { filterBookingsByDateRange, calculateEarnings, formatCurrency } from '@/lib/detailer/dashboard-utils';
 import { getDetailerOrganization, getOrganizationRole } from '@/lib/detailer/mode-detection';
 
@@ -23,6 +24,7 @@ export default async function DetailerDashboardPage() {
   let myBookings: any[] = [];
   let orgBookings: any[] = [];
   let availabilitySlots: any[] = [];
+  let daysOff: any[] = [];
   let filteredBookings: any[] = [];
   let todaysBookings: any[] = [];
   let stats = {
@@ -212,6 +214,10 @@ export default async function DetailerDashboardPage() {
 
     availabilitySlots = availability || [];
 
+    // Get days off
+    const { data: daysOffData } = await supabase.rpc('get_detailer_days_off');
+    daysOff = daysOffData || [];
+
     // Filter bookings to only show those within availability windows
     filteredBookings = myBookings.filter((booking) => {
       if (!booking.scheduled_date || !booking.scheduled_time_start) return false;
@@ -381,6 +387,24 @@ export default async function DetailerDashboardPage() {
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6 mb-8">
           <h2 className="text-xl font-semibold text-white mb-4">Today's Jobs</h2>
           <TodaysJobsList bookings={todaysBookings} />
+        </div>
+
+        {/* Availability Calendar Preview */}
+        <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-white">Weekly Availability</h2>
+            <Link
+              href="/detailer/availability"
+              className="text-[#32CE7A] hover:text-[#6FF0C4] text-sm font-medium"
+            >
+              Manage Availability →
+            </Link>
+          </div>
+          <AvailabilityCalendar
+            availability={availabilitySlots}
+            daysOff={daysOff}
+            bookings={mode === 'organization' && orgBookings.length > 0 ? orgBookings : filteredBookings}
+          />
         </div>
 
         {/* Calendar View */}
