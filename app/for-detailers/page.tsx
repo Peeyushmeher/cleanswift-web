@@ -112,7 +112,7 @@ export default function ForDetailersPage() {
           <p className="text-slate-400 text-lg mb-8">
             Sign in to access your dashboard and manage your bookings
           </p>
-          <Link href="/auth/login" className="btn-primary inline-flex items-center gap-2">
+          <Link href="/auth/login?switch=true" className="btn-primary inline-flex items-center gap-2">
             Sign In to Dashboard
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 12h14"/>

@@ -59,9 +59,9 @@ export default function AvailabilityPage() {
 
   // Verify user authentication and role
   const verifyUser = useCallback(async (): Promise<UserProfile | null> => {
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { user }, error } = await supabase.auth.getUser();
     
-    if (!session?.user) {
+    if (error || !user) {
       router.push('/auth/login');
       return null;
     }
@@ -69,7 +69,7 @@ export default function AvailabilityPage() {
     const { data: profile } = await supabase
       .from('profiles')
       .select('id, role')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single();
 
     if (!profile) {
@@ -111,50 +111,154 @@ export default function AvailabilityPage() {
       const hasRecord = await checkDetailerRecord(profile.id);
       setHasDetailerRecord(hasRecord);
 
-      // If admin without detailer record, show empty state (not an error)
-      if (profile.role === 'admin' && !hasRecord) {
-        setAvailability([]);
+      // If detailer role but no record found, show error
+      if (profile.role === 'detailer' && !hasRecord) {
+        setError('Detailer profile not found. Please complete onboarding or contact support.');
         setLoading(false);
         return;
       }
 
-      // Fetch availability
-      const { data, error: fetchError } = await supabase.rpc('get_detailer_availability');
+      // If admin without detailer record, show empty state (not an error)
+      if (profile.role === 'admin' && !hasRecord) {
+        setAvailability([]);
+        setDaysOff([]);
+        setLoading(false);
+        return;
+      }
+
+      // For detailers, get the detailer ID first
+      let detailerId: string | null = null;
+      if (profile.role === 'detailer' && hasRecord) {
+        const { data: detailerData, error: detailerError } = await supabase
+          .from('detailers')
+          .select('id')
+          .eq('profile_id', profile.id)
+          .maybeSingle();
+
+        if (detailerError || !detailerData) {
+          setError('Failed to load detailer information. Please try again.');
+          setLoading(false);
+          return;
+        }
+
+        detailerId = detailerData.id;
+      }
+
+      // Fetch availability - use the detailer_id we already fetched for detailers
+      // The RPC will verify it belongs to the current user, which it does
+      const { data: availabilityData, error: fetchError } = await supabase.rpc('get_detailer_availability', 
+        detailerId ? { p_detailer_id: detailerId } : {}
+      );
 
       if (fetchError) {
-        // Handle permission errors by redirecting
-        if (isPermissionError(fetchError.message)) {
-          router.push('/auth/login');
+        console.error('Error fetching availability via RPC:', {
+          message: fetchError.message,
+          code: fetchError.code,
+          details: fetchError.details,
+          hint: fetchError.hint,
+          detailerId: detailerId,
+        });
+        
+        // If RPC fails and we have a detailer ID, try direct query as fallback
+        if (detailerId) {
+          console.log('RPC failed, trying direct query as fallback...');
+          const { data: directData, error: directError } = await supabase
+            .from('detailer_availability')
+            .select('*')
+            .eq('detailer_id', detailerId)
+            .order('day_of_week', { ascending: true });
+
+          if (directError) {
+            console.error('Direct query also failed:', {
+              message: directError.message,
+              code: directError.code,
+              details: directError.details,
+              hint: directError.hint,
+            });
+            setError(fetchError.message || directError.message || 'Failed to load availability. Please try again.');
+            setLoading(false);
+            return;
+          }
+
+          setAvailability(Array.isArray(directData) ? directData : []);
+        } else {
+          // No detailer ID, show error
+          setError(fetchError.message || 'Failed to load availability. Please try again.');
+          setLoading(false);
           return;
         }
-        throw fetchError;
-      }
-      
-      setAvailability(data || []);
-
-      // Fetch days off
-      const { data: daysOffData, error: daysOffError } = await supabase.rpc('get_detailer_days_off');
-
-      if (daysOffError) {
-        // Handle permission errors by redirecting
-        if (isPermissionError(daysOffError.message)) {
-          router.push('/auth/login');
-          return;
-        }
-        console.error('Error fetching days off:', daysOffError);
-        // Don't fail the whole operation
       } else {
-        setDaysOff(daysOffData || []);
+        // RPC succeeded
+        const availabilityArray = Array.isArray(availabilityData) ? availabilityData : (availabilityData ? [availabilityData] : []);
+        setAvailability(availabilityArray);
+      }
+
+      // Fetch days off - use the detailer_id we already fetched
+      // The RPC will verify it belongs to the current user, which it does
+      const startDate = new Date();
+      startDate.setFullYear(startDate.getFullYear() - 1);
+      const endDate = new Date();
+      endDate.setFullYear(endDate.getFullYear() + 10);
+      
+      // Only call RPC if we have a detailer ID (for detailers) or if admin
+      if (profile.role === 'detailer' && detailerId) {
+        const { data: daysOffData, error: daysOffError } = await supabase.rpc('get_detailer_days_off', {
+          p_detailer_id: detailerId, // Pass the detailer_id we already verified
+          p_start_date: startDate.toISOString().split('T')[0],
+          p_end_date: endDate.toISOString().split('T')[0],
+        });
+
+        if (daysOffError) {
+          console.error('Error fetching days off via RPC:', {
+            message: daysOffError.message,
+            code: daysOffError.code,
+            details: daysOffError.details,
+            hint: daysOffError.hint,
+            detailerId: detailerId,
+          });
+          
+          // If RPC fails, try direct query as fallback
+          console.log('RPC failed for days off, trying direct query as fallback...');
+          const { data: directDaysOffData, error: directDaysOffError } = await supabase
+            .from('detailer_days_off')
+            .select('*')
+            .eq('detailer_id', detailerId)
+            .eq('is_active', true)
+            .gte('date', startDate.toISOString().split('T')[0])
+            .lte('date', endDate.toISOString().split('T')[0])
+            .order('date', { ascending: true });
+
+          if (directDaysOffError) {
+            console.error('Direct query for days off also failed:', {
+              message: directDaysOffError.message,
+              code: directDaysOffError.code,
+              details: directDaysOffError.details,
+              hint: directDaysOffError.hint,
+            });
+          } else {
+            setDaysOff(Array.isArray(directDaysOffData) ? directDaysOffData : []);
+          }
+          // If direct query also fails, continue without days off (don't fail the whole operation)
+        } else {
+          const daysOffArray = Array.isArray(daysOffData) ? daysOffData : (daysOffData ? [daysOffData] : []);
+          setDaysOff(daysOffArray);
+        }
+      } else if (profile.role === 'admin') {
+        // For admins, call RPC without detailer_id
+        const { data: daysOffData, error: daysOffError } = await supabase.rpc('get_detailer_days_off', {
+          p_detailer_id: null,
+          p_start_date: startDate.toISOString().split('T')[0],
+          p_end_date: endDate.toISOString().split('T')[0],
+        });
+
+        if (!daysOffError && daysOffData) {
+          const daysOffArray = Array.isArray(daysOffData) ? daysOffData : (daysOffData ? [daysOffData] : []);
+          setDaysOff(daysOffArray);
+        }
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load availability';
-      
-      // Check for permission errors and redirect
-      if (isPermissionError(errorMessage)) {
-        router.push('/auth/login');
-        return;
-      }
-      
+      console.error('Error in fetchAvailability:', err);
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -171,6 +275,50 @@ export default function AvailabilityPage() {
       setSaving(true);
       setError(null);
 
+      // Verify session is valid before calling RPC
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session || !session.user) {
+        console.error('Session error:', sessionError, 'Session:', session);
+        setError('You must be logged in to update availability. Please refresh the page.');
+        return;
+      }
+
+      console.log('Session verified:', { 
+        userId: session.user.id, 
+        expiresAt: session.expires_at,
+        accessToken: session.access_token ? 'present' : 'missing'
+      });
+
+      // Verify user's role is detailer
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .single();
+
+      if (profileError) {
+        console.error('Profile query error:', {
+          message: profileError.message,
+          code: profileError.code,
+          details: profileError.details,
+          hint: profileError.hint,
+        });
+        setError('Failed to verify your account. Please refresh the page.');
+        return;
+      }
+
+      if (!profile || profile.role !== 'detailer') {
+        console.error('User role check failed:', { 
+          userId: session.user.id, 
+          role: profile?.role,
+          hasProfile: !!profile 
+        });
+        setError('Only detailers can update availability. Please contact support if you believe this is an error.');
+        return;
+      }
+
+      console.log('User verified for availability update:', { userId: session.user.id, role: profile.role });
+
       const existingSlot = availability.find((slot) => slot.day_of_week === dayOfWeek);
 
       if (existingSlot) {
@@ -180,14 +328,22 @@ export default function AvailabilityPage() {
           p_start_time: existingSlot.start_time,
           p_end_time: existingSlot.end_time,
           p_is_active: !existingSlot.is_active,
+          p_lunch_start_time: existingSlot.lunch_start_time || null,
+          p_lunch_end_time: existingSlot.lunch_end_time || null,
         });
 
         if (updateError) {
-          if (isPermissionError(updateError.message)) {
-            router.push('/auth/login');
-            return;
-          }
-          throw updateError;
+          console.error('Error updating availability:', updateError);
+          console.error('Error details:', {
+            message: updateError.message,
+            code: updateError.code,
+            details: updateError.details,
+            hint: updateError.hint,
+            error: updateError,
+            stringified: JSON.stringify(updateError),
+          });
+          setError(updateError.message || 'Failed to update availability. Please try again.');
+          return;
         }
       } else {
         // Create new slot with default hours (9 AM - 5 PM)
@@ -199,21 +355,24 @@ export default function AvailabilityPage() {
         });
 
         if (createError) {
-          if (isPermissionError(createError.message)) {
-            router.push('/auth/login');
-            return;
-          }
-          throw createError;
+          console.error('Error creating availability:', createError);
+          console.error('Error details:', {
+            message: createError.message,
+            code: createError.code,
+            details: createError.details,
+            hint: createError.hint,
+            error: createError,
+            stringified: JSON.stringify(createError),
+          });
+          setError(createError.message || 'Failed to create availability. Please try again.');
+          return;
         }
       }
 
       await fetchAvailability();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update availability';
-      if (isPermissionError(errorMessage)) {
-        router.push('/auth/login');
-        return;
-      }
+      console.error('Error in handleToggleDay:', err);
       setError(errorMessage);
     } finally {
       setSaving(false);
@@ -224,6 +383,50 @@ export default function AvailabilityPage() {
     try {
       setSaving(true);
       setError(null);
+
+      // Verify session is valid before calling RPC
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session || !session.user) {
+        console.error('Session error:', sessionError, 'Session:', session);
+        setError('You must be logged in to update availability. Please refresh the page.');
+        return;
+      }
+
+      console.log('Session verified for time update:', { 
+        userId: session.user.id, 
+        expiresAt: session.expires_at,
+        accessToken: session.access_token ? 'present' : 'missing'
+      });
+
+      // Verify user's role is detailer
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .single();
+
+      if (profileError) {
+        console.error('Profile query error:', {
+          message: profileError.message,
+          code: profileError.code,
+          details: profileError.details,
+          hint: profileError.hint,
+        });
+        setError('Failed to verify your account. Please refresh the page.');
+        return;
+      }
+
+      if (!profile || profile.role !== 'detailer') {
+        console.error('User role check failed:', { 
+          userId: session.user.id, 
+          role: profile?.role,
+          hasProfile: !!profile 
+        });
+        setError('Only detailers can update availability. Please contact support if you believe this is an error.');
+        return;
+      }
+
+      console.log('User verified for time update:', { userId: session.user.id, role: profile.role });
 
       const existingSlot = availability.find((slot) => slot.day_of_week === dayOfWeek);
       const timeValue = value.includes(':') && value.split(':').length === 2 ? `${value}:00` : value;
@@ -238,19 +441,19 @@ export default function AvailabilityPage() {
       });
 
       if (updateError) {
-        if (isPermissionError(updateError.message)) {
-          router.push('/auth/login');
-          return;
-        }
-        throw updateError;
+        console.error('Error updating time:', {
+          message: updateError.message,
+          code: updateError.code,
+          details: updateError.details,
+          hint: updateError.hint,
+        });
+        setError(updateError.message || 'Failed to update time. Please try again.');
+        return;
       }
       await fetchAvailability();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update time';
-      if (isPermissionError(errorMessage)) {
-        router.push('/auth/login');
-        return;
-      }
+      console.error('Error in handleTimeChange:', err);
       setError(errorMessage);
     } finally {
       setSaving(false);
@@ -261,6 +464,50 @@ export default function AvailabilityPage() {
     try {
       setSaving(true);
       setError(null);
+
+      // Verify session is valid before calling RPC
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session || !session.user) {
+        console.error('Session error:', sessionError, 'Session:', session);
+        setError('You must be logged in to update availability. Please refresh the page.');
+        return;
+      }
+
+      console.log('Session verified for lunch break update:', { 
+        userId: session.user.id, 
+        expiresAt: session.expires_at,
+        accessToken: session.access_token ? 'present' : 'missing'
+      });
+
+      // Verify user's role is detailer
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .single();
+
+      if (profileError) {
+        console.error('Profile query error:', {
+          message: profileError.message,
+          code: profileError.code,
+          details: profileError.details,
+          hint: profileError.hint,
+        });
+        setError('Failed to verify your account. Please refresh the page.');
+        return;
+      }
+
+      if (!profile || profile.role !== 'detailer') {
+        console.error('User role check failed:', { 
+          userId: session.user.id, 
+          role: profile?.role,
+          hasProfile: !!profile 
+        });
+        setError('Only detailers can update availability. Please contact support if you believe this is an error.');
+        return;
+      }
+
+      console.log('User verified for lunch break update:', { userId: session.user.id, role: profile.role });
 
       const existingSlot = availability.find((slot) => slot.day_of_week === dayOfWeek);
       if (!existingSlot) return;
@@ -277,19 +524,19 @@ export default function AvailabilityPage() {
       });
 
       if (updateError) {
-        if (isPermissionError(updateError.message)) {
-          router.push('/auth/login');
-          return;
-        }
-        throw updateError;
+        console.error('Error updating lunch break:', {
+          message: updateError.message,
+          code: updateError.code,
+          details: updateError.details,
+          hint: updateError.hint,
+        });
+        setError(updateError.message || 'Failed to update lunch break. Please try again.');
+        return;
       }
       await fetchAvailability();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update lunch break';
-      if (isPermissionError(errorMessage)) {
-        router.push('/auth/login');
-        return;
-      }
+      console.error('Error in handleLunchBreakToggle:', err);
       setError(errorMessage);
     } finally {
       setSaving(false);
@@ -309,11 +556,8 @@ export default function AvailabilityPage() {
       });
 
       if (addError) {
-        if (isPermissionError(addError.message)) {
-          router.push('/auth/login');
-          return;
-        }
-        throw addError;
+        setError(addError.message || 'Failed to add day off. Please try again.');
+        return;
       }
 
       setNewDayOffDate('');
@@ -321,10 +565,7 @@ export default function AvailabilityPage() {
       await fetchAvailability();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to add day off';
-      if (isPermissionError(errorMessage)) {
-        router.push('/auth/login');
-        return;
-      }
+      console.error('Error in handleAddDayOff:', err);
       setError(errorMessage);
     } finally {
       setSaving(false);
@@ -341,20 +582,14 @@ export default function AvailabilityPage() {
       });
 
       if (removeError) {
-        if (isPermissionError(removeError.message)) {
-          router.push('/auth/login');
-          return;
-        }
-        throw removeError;
+        setError(removeError.message || 'Failed to remove day off. Please try again.');
+        return;
       }
 
       await fetchAvailability();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to remove day off';
-      if (isPermissionError(errorMessage)) {
-        router.push('/auth/login');
-        return;
-      }
+      console.error('Error in handleRemoveDayOff:', err);
       setError(errorMessage);
     } finally {
       setSaving(false);

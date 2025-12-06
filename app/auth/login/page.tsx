@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -25,32 +25,82 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ email?: string; name?: string } | null>(null);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const supabase = createClient();
+
+  // Check if user is already logged in (client-side only to avoid hydration mismatch)
+  useEffect(() => {
+    setMounted(true);
+    const checkCurrentUser = async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (!error && user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', user.id)
+          .single();
+        
+        setCurrentUser({
+          email: user.email || profile?.email,
+          name: profile?.full_name || user.email?.split('@')[0],
+        });
+      }
+    };
+    checkCurrentUser();
+  }, [supabase]);
+
+  const handleSignOut = async () => {
+    setIsSigningOut(true);
+    await supabase.auth.signOut();
+    setCurrentUser(null);
+    setIsSigningOut(false);
+    // Clear form
+    setEmail('');
+    setPassword('');
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    console.log('=== LOGIN FLOW STARTED ===');
     setLoading(true);
     setError(null);
 
     try {
+      // If user is already logged in, sign them out first
+      if (currentUser) {
+        console.log('Current user detected, signing out first:', currentUser);
+        await supabase.auth.signOut();
+        setCurrentUser(null);
+      }
+
       // Trim email and password to avoid whitespace issues
       const trimmedEmail = email.trim().toLowerCase();
       const trimmedPassword = password.trim();
 
+      console.log('Login attempt for email:', trimmedEmail);
+
       if (!trimmedEmail || !trimmedPassword) {
+        console.warn('Login validation failed: missing email or password');
         setError('Please enter both email and password.');
         setLoading(false);
         return;
       }
 
+      console.log('Attempting authentication...');
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email: trimmedEmail,
         password: trimmedPassword,
       });
 
       if (signInError) {
-        console.error('Login error:', signInError);
+        console.error('Authentication failed:', {
+          error: signInError,
+          message: signInError.message,
+          code: signInError.code,
+        });
         
         // Provide more helpful error messages
         if (signInError.message.includes('Invalid login credentials') || signInError.message.includes('Email not confirmed')) {
@@ -63,12 +113,19 @@ function LoginForm() {
       }
 
       if (!data.user) {
+        console.error('Authentication succeeded but no user data returned');
         setError('Login failed: No user data returned');
         setLoading(false);
         return;
       }
 
+      console.log('Authentication successful. User ID:', data.user.id);
+
+      // Clear current user state since we're signing in with a new account
+      setCurrentUser(null);
+
       // Fetch user profile to determine role
+      console.log('Fetching user profile...');
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('role, onboarding_completed')
@@ -76,46 +133,189 @@ function LoginForm() {
         .single();
 
       if (profileError) {
-        console.error('Profile fetch error:', profileError);
-        // Default to detailer dashboard if profile fetch fails
-        window.location.href = '/detailer/dashboard';
+        console.error('Profile fetch error:', {
+          error: profileError,
+          message: profileError.message,
+          code: profileError.code,
+          details: profileError.details,
+          hint: profileError.hint,
+        });
+        
+        // Check if detailer record exists even if profile fetch failed
+        console.log('Profile fetch failed, checking for detailer record as fallback...');
+        const { data: detailerCheck, error: detailerCheckError } = await supabase
+          .from('detailers')
+          .select('id, is_active')
+          .eq('profile_id', data.user.id)
+          .maybeSingle();
+        
+        console.log('Detailer check result:', { detailerCheck, detailerCheckError });
+        
+        if (detailerCheck) {
+          // Detailer record exists, redirect to pending (profile might need fixing)
+          console.log('Detailer record found despite profile error, redirecting to pending');
+          window.location.href = '/detailer/pending';
+        } else {
+          // No detailer record, redirect to onboarding
+          console.log('No detailer record found, redirecting to onboarding');
+          window.location.href = '/onboard';
+        }
         return;
       }
 
+      console.log('Profile fetched successfully:', {
+        role: profile?.role,
+        onboardingCompleted: profile?.onboarding_completed,
+        profileId: profile?.id,
+      });
+
       // If there's a redirect parameter, use it (for onboarding flow)
       if (redirectTo) {
+        console.log('Redirect parameter found, redirecting to:', redirectTo);
         window.location.href = redirectTo;
         return;
       }
 
-      // Redirect based on role
-      if (profile?.role === 'admin') {
-        window.location.href = '/admin/dashboard';
-      } else if (profile?.role === 'detailer') {
-        // Check if detailer is active before redirecting to dashboard
-        const { data: detailer } = await supabase
-          .from('detailers')
-          .select('is_active')
-          .eq('profile_id', data.user.id)
-          .single();
+      // Check if user has a detailer record even if role isn't set
+      // Use maybeSingle() instead of single() to handle cases where record doesn't exist
+      let detailerRecord: { is_active: boolean } | null = null;
+      let detailerError: any = null;
+      
+      const { data: detailerData, error: detailerQueryError } = await supabase
+        .from('detailers')
+        .select('is_active')
+        .eq('profile_id', data.user.id)
+        .maybeSingle();
 
-        // Check onboarding status
-        if (!profile.onboarding_completed) {
-          window.location.href = '/onboard';
-          return;
+      detailerRecord = detailerData;
+      detailerError = detailerQueryError;
+
+      // If query failed, try using RPC function as fallback
+      if (detailerError && !detailerRecord) {
+        console.warn('Detailer query failed, trying RPC fallback:', detailerError);
+        try {
+          const { data: rpcData, error: rpcError } = await supabase.rpc('get_detailer_by_profile', {
+            p_profile_id: data.user.id,
+          });
+          
+          if (!rpcError && rpcData) {
+            console.log('RPC fallback succeeded, found detailer:', rpcData);
+            detailerRecord = { is_active: rpcData.is_active || false };
+            detailerError = null;
+          } else {
+            console.warn('RPC fallback also failed:', rpcError);
+          }
+        } catch (rpcErr) {
+          console.error('RPC fallback exception:', rpcErr);
         }
+      }
 
-        // Check if detailer is active
-        if (!detailer || !detailer.is_active) {
-          // Detailer is pending approval
+      // Log for debugging
+      console.log('Login redirect check:', {
+        userId: data.user.id,
+        profileRole: profile?.role,
+        onboardingCompleted: profile?.onboarding_completed,
+        detailerRecord: detailerRecord,
+        detailerRecordIsActive: detailerRecord?.is_active,
+        detailerError: detailerError?.message || detailerError?.code,
+        detailerErrorDetails: detailerError,
+      });
+
+      // If detailer record exists but role isn't set, treat as detailer
+      const effectiveRole = profile?.role || (detailerRecord ? 'detailer' : null);
+      
+      console.log('Effective role determined:', effectiveRole, {
+        profileRole: profile?.role,
+        hasDetailerRecord: !!detailerRecord,
+      });
+
+      // Redirect based on role
+      console.log('=== REDIRECT DECISION ===');
+      console.log('Effective role:', effectiveRole);
+      console.log('Detailer record:', detailerRecord);
+      console.log('Profile onboarding completed:', profile?.onboarding_completed);
+      
+      if (effectiveRole === 'admin') {
+        console.log('✓ User is admin, redirecting to admin dashboard');
+        window.location.href = '/admin/dashboard';
+      } else if (effectiveRole === 'detailer') {
+        console.log('✓ User is detailer, checking status...');
+        
+        // If detailer record exists but onboarding_completed is false, 
+        // they likely completed onboarding but the flag wasn't set
+        // Check if detailer is active first (more important check)
+        if (!detailerRecord) {
+          console.error('✗ Detailer record not found for user:', data.user.id);
+          console.error('  Profile role:', profile?.role);
+          console.error('  This should not happen if role is detailer');
+          // If profile says detailer but no record, redirect to pending
           window.location.href = '/detailer/pending';
           return;
         }
 
-        // Detailer is active, redirect to dashboard
+        console.log('  Detailer record found, is_active:', detailerRecord.is_active);
+        
+        if (!detailerRecord.is_active) {
+          // Detailer is pending approval
+          console.log('✗ Detailer not active, redirecting to /detailer/pending');
+          window.location.href = '/detailer/pending';
+          return;
+        }
+
+        // If detailer is active but onboarding_completed is false, 
+        // they've been approved but onboarding flag wasn't set - allow access
+        if (!profile?.onboarding_completed) {
+          console.warn('⚠ Detailer is active but onboarding_completed is false. Allowing access to dashboard.');
+          // Still redirect to dashboard since they're active and approved
+          window.location.href = '/detailer/dashboard';
+          return;
+        }
+
+        // Detailer is active and onboarding completed, redirect to dashboard
+        console.log('✓ Detailer is active and onboarding completed, redirecting to /detailer/dashboard');
         window.location.href = '/detailer/dashboard';
       } else {
-        // Regular users - redirect to onboarding if they don't have a role yet
+        // Regular users or no role
+        console.log('No detailer role found. Profile:', profile);
+        
+        // Before redirecting to /onboard, check if user has completed onboarding
+        // If they have, they shouldn't go to onboarding (which would redirect to home)
+        if (profile?.onboarding_completed) {
+          console.warn('User has completed onboarding but no detailer role. Checking for detailer record again...');
+          
+          // Try one more time to find detailer record using RPC function
+          try {
+            const { data: rpcDetailer, error: rpcError } = await supabase.rpc('get_detailer_by_profile', {
+              p_profile_id: data.user.id,
+            });
+            
+            if (!rpcError && rpcDetailer) {
+              console.log('Found detailer via RPC after onboarding check:', rpcDetailer);
+              
+              // User is a detailer, check if active
+              if (rpcDetailer.is_active) {
+                console.log('Detailer is active, redirecting to dashboard');
+                window.location.href = '/detailer/dashboard';
+                return;
+              } else {
+                console.log('Detailer is not active, redirecting to pending');
+                window.location.href = '/detailer/pending';
+                return;
+              }
+            }
+          } catch (rpcErr) {
+            console.error('RPC check failed:', rpcErr);
+          }
+          
+          // If we get here, user completed onboarding but isn't a detailer
+          // This shouldn't happen, but redirect to home instead of onboarding
+          console.error('User completed onboarding but is not a detailer. Redirecting to home.');
+          window.location.href = '/';
+          return;
+        }
+        
+        // User hasn't completed onboarding, redirect to onboarding
+        console.log('User has not completed onboarding, redirecting to /onboard');
         window.location.href = '/onboard';
       }
     } catch (err) {
@@ -170,7 +370,25 @@ function LoginForm() {
           {/* Subtle glow effect */}
           <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-cyan-500/5 to-transparent pointer-events-none" />
           
-          <form onSubmit={handleLogin} className="space-y-6 relative z-10">
+          <form onSubmit={handleLogin} className="space-y-6 relative z-10" suppressHydrationWarning>
+            {mounted && currentUser && (
+              <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-4 py-3 rounded-lg text-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Currently signed in as {currentUser.name || currentUser.email}</p>
+                    <p className="text-xs text-blue-300 mt-1">Sign in with a different account below, or sign out first.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    disabled={isSigningOut}
+                    className="ml-4 px-3 py-1.5 text-xs bg-blue-500/20 hover:bg-blue-500/30 rounded transition-colors disabled:opacity-50"
+                  >
+                    {isSigningOut ? 'Signing out...' : 'Sign Out'}
+                  </button>
+                </div>
+              </div>
+            )}
             {message && (
               <div className="bg-green-500/10 border border-green-500/20 text-green-400 px-4 py-3 rounded-lg text-sm animate-fade-in">
                 {message}

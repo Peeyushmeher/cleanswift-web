@@ -12,10 +12,18 @@ export default async function AdminUsersPage({
 
   const roleFilter = params.role || null;
 
-  // Get all users
+  // Get all users with detailer record check
   let query = supabase
     .from('profiles')
-    .select('id, full_name, email, phone, role, created_at')
+    .select(`
+      id, 
+      full_name, 
+      email, 
+      phone, 
+      role, 
+      created_at,
+      detailers(id, is_active)
+    `)
     .order('created_at', { ascending: false })
     .limit(100);
 
@@ -31,10 +39,18 @@ export default async function AdminUsersPage({
     const newRole = formData.get('role') as string;
     if (userId && newRole) {
       const supabase = await createClient();
-      await supabase.rpc('update_user_role', {
+      const { error } = await supabase.rpc('update_user_role', {
         p_user_id: userId,
         p_new_role: newRole as 'user' | 'detailer' | 'admin',
       });
+      
+      if (error) {
+        // Handle error - could redirect with error message or show error
+        console.error('Error updating role:', error);
+        // For now, still redirect but the error will be logged
+        // In production, you might want to show an error message
+      }
+      
       redirect('/admin/users');
     }
   }
@@ -96,9 +112,22 @@ export default async function AdminUsersPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((user: any) => (
+                  {users.map((user: any) => {
+                    const hasDetailerRecord = user.detailers && Array.isArray(user.detailers) && user.detailers.length > 0;
+                    const isDetailer = user.role === 'detailer' || hasDetailerRecord;
+                    
+                    return (
                     <tr key={user.id} className="border-b border-white/5 hover:bg-white/5">
-                      <td className="py-3 px-4 text-white text-sm">{user.full_name}</td>
+                        <td className="py-3 px-4 text-white text-sm">
+                          <div className="flex items-center gap-2">
+                            {user.full_name}
+                            {hasDetailerRecord && (
+                              <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs rounded border border-cyan-500/30">
+                                Detailer
+                              </span>
+                            )}
+                          </div>
+                        </td>
                       <td className="py-3 px-4 text-white text-sm">{user.email}</td>
                       <td className="py-3 px-4 text-white text-sm">{user.phone}</td>
                       <td className="py-3 px-4 text-sm">
@@ -106,27 +135,43 @@ export default async function AdminUsersPage({
                       </td>
                       <td className="py-3 px-4 text-white text-sm">{user.booking_count || 0}</td>
                       <td className="py-3 px-4">
-                        <form action={updateRole} className="flex gap-2">
+                          <form action={updateRole} className="flex gap-2 items-center">
                           <input type="hidden" name="user_id" value={user.id} />
                           <select
                             name="role"
                             defaultValue={user.role}
                             className="px-3 py-1 bg-[#050B12] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
+                              disabled={isDetailer && user.role === 'detailer'}
+                              title={isDetailer && user.role === 'detailer' ? 'Detailer role is protected. Cannot change role for users with detailer records.' : ''}
                           >
-                            <option value="user">User</option>
+                              <option value="user" disabled={isDetailer}>
+                                User{isDetailer ? ' (Protected)' : ''}
+                              </option>
                             <option value="detailer">Detailer</option>
                             <option value="admin">Admin</option>
                           </select>
+                            {isDetailer && user.role === 'detailer' ? (
+                              <span className="text-xs text-yellow-400 px-2">
+                                Protected
+                              </span>
+                            ) : (
                           <button
                             type="submit"
                             className="bg-[#32CE7A] hover:bg-[#2AB869] text-white text-sm font-semibold py-1 px-3 rounded transition-colors"
                           >
                             Update
                           </button>
+                            )}
                         </form>
+                          {isDetailer && (
+                            <p className="text-xs text-yellow-400 mt-1">
+                              This user has a detailer record. Role is protected from being changed to 'user'.
+                            </p>
+                          )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

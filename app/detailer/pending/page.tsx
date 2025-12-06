@@ -8,9 +8,9 @@ export default async function PendingApprovalPage() {
   const supabase = await createClient();
   
   // Check authentication
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user }, error } = await supabase.auth.getUser();
   
-  if (!session) {
+  if (error || !user) {
     redirect('/auth/login');
   }
 
@@ -18,7 +18,7 @@ export default async function PendingApprovalPage() {
   const { data: profile } = await supabase
     .from('profiles')
     .select('id, role, onboarding_completed')
-    .eq('id', session.user.id)
+    .eq('id', user.id)
     .single();
 
   if (!profile) {

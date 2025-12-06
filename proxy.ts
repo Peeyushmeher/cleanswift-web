@@ -87,11 +87,18 @@ export async function proxy(request: NextRequest) {
       .single();
 
     if (profileError || !profile || (profile.role !== 'detailer' && profile.role !== 'admin')) {
+      console.log('Detailer route access denied:', {
+        profileError: profileError?.message,
+        hasProfile: !!profile,
+        role: profile?.role,
+        userId: user!.id,
+      });
       return NextResponse.redirect(new URL('/auth/login', request.url));
     }
 
-    // Admins can always access
+    // Admins can always access detailer routes
     if (profile.role === 'admin') {
+      console.log('Admin accessing detailer route, allowing access');
       return supabaseResponse;
     }
 
@@ -101,16 +108,26 @@ export async function proxy(request: NextRequest) {
     }
 
     // Check if detailer is active
-    const { data: detailer } = await supabase
+    // Use maybeSingle() to handle cases where record doesn't exist
+    const { data: detailer, error: detailerError } = await supabase
       .from('detailers')
       .select('is_active')
       .eq('profile_id', user!.id)
-      .single();
+      .maybeSingle();
 
-    // If no detailer record or not active, redirect to home
-    // (User should have been signed out after onboarding and will log in after approval)
-    if (!detailer || !detailer.is_active) {
-      return NextResponse.redirect(new URL('/', request.url));
+    // If query failed or no detailer record, redirect to pending page
+    if (detailerError || !detailer) {
+      console.log('Detailer record check failed:', {
+        error: detailerError?.message,
+        hasRecord: !!detailer,
+        userId: user!.id,
+      });
+      return NextResponse.redirect(new URL('/detailer/pending', request.url));
+    }
+
+    // If detailer is not active, redirect to pending page
+    if (!detailer.is_active) {
+      return NextResponse.redirect(new URL('/detailer/pending', request.url));
     }
   }
 
@@ -132,47 +149,60 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // Redirect authenticated users away from login page
+  // Allow access to login page even when authenticated (for switching accounts)
+  // Only redirect if there's no ?switch=true query parameter
   if (pathname.startsWith('/auth/login') && isAuthenticated) {
+    const switchAccount = request.nextUrl.searchParams.get('switch');
+    
+    // If user explicitly wants to switch accounts, allow access to login page
+    if (switchAccount === 'true') {
+      return supabaseResponse;
+    }
+
+    // Otherwise, redirect authenticated users to their dashboard
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('role')
+      .select('role, onboarding_completed')
       .eq('id', user!.id)
       .single();
+
+    // Check if user has a detailer record even if profile fetch failed or role isn't set
+    const { data: detailerRecord } = await supabase
+      .from('detailers')
+      .select('is_active')
+      .eq('profile_id', user!.id)
+      .single();
+
+    // If detailer record exists but profile fetch failed, redirect to pending
+    if (profileError && detailerRecord) {
+      return NextResponse.redirect(new URL('/detailer/pending', request.url));
+    }
 
     // Only redirect if we successfully got the profile
     // If there's an error, let the login page handle it (might be RLS issue)
     if (profile && !profileError) {
-      if (profile.role === 'admin') {
-        return NextResponse.redirect(new URL('/admin/dashboard', request.url));
-      } else if (profile.role === 'detailer') {
-        // Check onboarding and active status for detailers
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('onboarding_completed')
-          .eq('id', user!.id)
-          .single();
+      // If detailer record exists but role isn't set, treat as detailer
+      const effectiveRole = profile.role || (detailerRecord ? 'detailer' : null);
 
-        if (!profileData?.onboarding_completed) {
-          return NextResponse.redirect(new URL('/onboard', request.url));
+      if (effectiveRole === 'admin') {
+        return NextResponse.redirect(new URL('/admin/dashboard', request.url));
+      } else if (effectiveRole === 'detailer') {
+        // Check if detailer is active first (more important than onboarding flag)
+        if (!detailerRecord || !detailerRecord.is_active) {
+          return NextResponse.redirect(new URL('/detailer/pending', request.url));
         }
 
-        const { data: detailer } = await supabase
-          .from('detailers')
-          .select('is_active')
-          .eq('profile_id', user!.id)
-          .single();
-
-        // If detailer is not active, they need to wait for approval
-        // Redirect to home page with a message (they'll be notified via email)
-        if (!detailer || !detailer.is_active) {
-          return NextResponse.redirect(new URL('/', request.url));
+        // If detailer is active but onboarding_completed is false,
+        // they've been approved but onboarding flag wasn't set - allow access
+        if (!profile.onboarding_completed) {
+          // Still allow access since they're active and approved
+          return NextResponse.redirect(new URL('/detailer/dashboard', request.url));
         }
 
         return NextResponse.redirect(new URL('/detailer/dashboard', request.url));
       }
     }
-    // If profile query failed, don't redirect - let user stay on login page
+    // If profile query failed and no detailer record, don't redirect - let user stay on login page
     // This prevents redirect loops when RLS blocks the query
   }
 
