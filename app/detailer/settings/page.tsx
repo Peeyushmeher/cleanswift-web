@@ -4,6 +4,7 @@ import { getDetailerOrganization, getOrganizationRole } from '@/lib/detailer/mod
 import { canManageOrgSettings } from '@/lib/detailer/permissions';
 import SettingsPageClient from './SettingsPageClient';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
 export default async function SettingsPage() {
   const profile = await requireDetailer();
@@ -13,10 +14,30 @@ export default async function SettingsPage() {
   const orgRole = organization ? await getOrganizationRole(organization.id) : null;
   const canManageOrg = organization && orgRole && canManageOrgSettings(orgRole);
 
-  // Get detailer record
+  // Get detailer record using RPC function (more reliable with RLS)
   const { data: detailerData } = await supabase.rpc('get_detailer_by_profile', {
-    p_profile_id: null,
+    p_profile_id: null, // null means use current user
   });
+  
+  // If RPC doesn't return all fields we need, fetch additional fields
+  let detailerWithStripe = detailerData;
+  if (detailerData?.id) {
+    const { data: stripeData } = await supabase
+      .from('detailers')
+      .select('stripe_connect_account_id')
+      .eq('id', detailerData.id)
+      .single();
+    
+    if (stripeData) {
+      detailerWithStripe = {
+        ...detailerData,
+        stripe_connect_account_id: stripeData.stripe_connect_account_id,
+      };
+    }
+  }
+  
+  // Note: We allow the settings page to render even if detailer record doesn't exist
+  // The UI will handle null detailer gracefully
 
   // Get service areas
   let serviceAreas: any[] = [];
@@ -60,7 +81,7 @@ export default async function SettingsPage() {
           profile={profile}
           serviceAreas={serviceAreas}
           notificationSettings={notificationSettings}
-          detailer={detailerData}
+          detailer={detailerWithStripe}
         />
       </div>
     </div>

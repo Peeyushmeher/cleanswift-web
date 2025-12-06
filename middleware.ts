@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -72,6 +72,26 @@ export async function proxy(request: NextRequest) {
         return NextResponse.redirect(new URL('/auth/login', request.url));
       }
       // Allow access to pending page
+      return supabaseResponse;
+    }
+
+    // Allow access to stripe-connect setup page without active detailer check
+    // Users need to be able to set up their Stripe account
+    if (pathname === '/detailer/stripe-connect') {
+      if (!isAuthenticated) {
+        return NextResponse.redirect(new URL('/auth/login', request.url));
+      }
+      // Basic role check only
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user!.id)
+        .single();
+      
+      if (!profile || (profile.role !== 'detailer' && profile.role !== 'admin')) {
+        return NextResponse.redirect(new URL('/auth/login', request.url));
+      }
+      // Allow access to stripe-connect page
       return supabaseResponse;
     }
 
