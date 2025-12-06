@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+
+// Force dynamic rendering to prevent static generation
+export const dynamic = 'force-dynamic';
 import Navigation from '@/app/components/Navigation';
 import Footer from '@/app/components/Footer';
 import OnboardingStep from '@/app/components/onboard/OnboardingStep';
@@ -16,7 +19,6 @@ const TOTAL_STEPS = 4;
 
 export default function OrganizationOnboardingPage() {
   const router = useRouter();
-  const supabase = createClient();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -46,6 +48,8 @@ export default function OrganizationOnboardingPage() {
 
   useEffect(() => {
     async function fetchUser() {
+      // Create Supabase client only when needed (client-side only)
+      const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setUserEmail(user.email || '');
@@ -54,7 +58,7 @@ export default function OrganizationOnboardingPage() {
       }
     }
     fetchUser();
-  }, [supabase]);
+  }, []);
 
   const validateStep = (step: number): boolean => {
     const newErrors: Partial<Record<string, string>> = {};
@@ -131,6 +135,8 @@ export default function OrganizationOnboardingPage() {
         setSubmitted(true);
         // Sign out the user and redirect to home page after a short delay
         setTimeout(async () => {
+          // Create Supabase client only when needed (client-side only)
+          const supabase = createClient();
           await supabase.auth.signOut();
           router.push('/');
         }, 3000);
