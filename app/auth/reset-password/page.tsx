@@ -5,6 +5,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
+// Force dynamic rendering to prevent static generation
+export const dynamic = 'force-dynamic';
+
 const SparklesIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
@@ -23,7 +26,6 @@ function ResetPasswordForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const supabase = createClient();
 
   useEffect(() => {
     // Check if we have the necessary hash/token in the URL
@@ -53,6 +55,8 @@ function ResetPasswordForm() {
     }
 
     try {
+      // Create Supabase client only when needed (client-side only)
+      const supabase = createClient();
       const { error: updateError } = await supabase.auth.updateUser({
         password: password.trim(),
       });
