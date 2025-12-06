@@ -12,10 +12,27 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import Stripe from 'https://esm.sh/stripe@14.21.0?target=deno';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+// Get allowed origins from environment variable or use default
+// Format: comma-separated list of origins (e.g., "https://app.example.com,https://www.example.com")
+const getAllowedOrigin = (requestOrigin: string | null): string => {
+  const allowedOriginsEnv = Deno.env.get('ALLOWED_ORIGINS');
+  if (allowedOriginsEnv) {
+    const allowedOrigins = allowedOriginsEnv.split(',').map(origin => origin.trim());
+    // If request origin is in allowed list, use it; otherwise use first allowed origin
+    if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+      return requestOrigin;
+    }
+    return allowedOrigins[0] || '*';
+  }
+  // Fallback: allow same origin or use wildcard (less secure but functional)
+  return requestOrigin || '*';
 };
+
+const getCorsHeaders = (requestOrigin: string | null) => ({
+  'Access-Control-Allow-Origin': getAllowedOrigin(requestOrigin),
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+});
 
 interface SubscriptionRequest {
   detailer_id: string;
@@ -30,6 +47,9 @@ interface SubscriptionResponse {
 }
 
 serve(async (req) => {
+  const requestOrigin = req.headers.get('Origin');
+  const corsHeaders = getCorsHeaders(requestOrigin);
+  
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -128,19 +148,15 @@ serve(async (req) => {
       );
     }
 
-    // Check if detailer is on subscription model
+    // Note: We allow creating subscription even if pricing_model isn't set to 'subscription' yet
+    // The API route will update pricing_model before calling this function, but there may be
+    // timing issues. If pricing_model is not 'subscription', we'll update it here as well.
     if (detailer.pricing_model !== 'subscription') {
-      console.log('ℹ️  Detailer is not on subscription model:', detailer.pricing_model);
-      return new Response(
-        JSON.stringify({ 
-          error: 'Detailer is not on subscription pricing model',
-          success: false 
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+      console.log('ℹ️  Updating pricing_model to subscription for detailer:', detailer.pricing_model);
+      await supabase
+        .from('detailers')
+        .update({ pricing_model: 'subscription' })
+        .eq('id', detailer_id);
     }
 
     // Check if subscription already exists

@@ -146,6 +146,7 @@ export interface Detailer {
   pricing_model?: 'subscription' | 'percentage' | null;
   stripe_subscription_id?: string | null;
   stripe_customer_id?: string | null;
+  stripe_connect_account_id?: string | null;
 }
 
 export interface EarningsSummary {

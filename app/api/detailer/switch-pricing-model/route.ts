@@ -47,6 +47,20 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Supabase URL not configured' }, { status: 500 });
       }
 
+      // First, update pricing model so Edge Function can validate it
+      const { error: updateError } = await supabase
+        .from('detailers')
+        .update({
+          pricing_model: pricing_model,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', detailer.id);
+
+      if (updateError) {
+        console.error('Error updating detailer:', updateError);
+        return NextResponse.json({ error: 'Failed to update pricing model' }, { status: 500 });
+      }
+
       try {
         const functionUrl = `${supabaseUrl}/functions/v1/create-detailer-subscription`;
         const response = await fetch(functionUrl, {
@@ -60,26 +74,21 @@ export async function POST(request: NextRequest) {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
+          // If subscription creation fails, revert pricing model
+          await supabase
+            .from('detailers')
+            .update({
+              pricing_model: detailer.pricing_model, // Revert to previous model
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', detailer.id);
+          
           return NextResponse.json({ 
             error: errorData.error || 'Failed to create subscription' 
           }, { status: 500 });
         }
 
         const result = await response.json();
-        
-        // Update pricing model
-        const { error: updateError } = await supabase
-          .from('detailers')
-          .update({
-            pricing_model: pricing_model,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', detailer.id);
-
-        if (updateError) {
-          console.error('Error updating detailer:', updateError);
-          return NextResponse.json({ error: 'Failed to update pricing model' }, { status: 500 });
-        }
 
         return NextResponse.json({ 
           success: true, 
@@ -87,6 +96,15 @@ export async function POST(request: NextRequest) {
         });
       } catch (error) {
         console.error('Error creating subscription:', error);
+        // Revert pricing model on error
+        await supabase
+          .from('detailers')
+          .update({
+            pricing_model: detailer.pricing_model, // Revert to previous model
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', detailer.id);
+        
         return NextResponse.json({ 
           error: 'Failed to create subscription' 
         }, { status: 500 });

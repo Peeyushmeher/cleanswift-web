@@ -3,10 +3,27 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+// Get allowed origins from environment variable or use default
+// Format: comma-separated list of origins (e.g., "https://app.example.com,https://www.example.com")
+const getAllowedOrigin = (requestOrigin: string | null): string => {
+  const allowedOriginsEnv = Deno.env.get('ALLOWED_ORIGINS');
+  if (allowedOriginsEnv) {
+    const allowedOrigins = allowedOriginsEnv.split(',').map(origin => origin.trim());
+    // If request origin is in allowed list, use it; otherwise use first allowed origin
+    if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+      return requestOrigin;
+    }
+    return allowedOrigins[0] || '*';
+  }
+  // Fallback: allow same origin or use wildcard (less secure but functional)
+  return requestOrigin || '*';
 };
+
+const getCorsHeaders = (requestOrigin: string | null) => ({
+  'Access-Control-Allow-Origin': getAllowedOrigin(requestOrigin),
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+});
 
 interface TestPaymentRequest {
   booking_id?: string;
@@ -14,6 +31,9 @@ interface TestPaymentRequest {
 }
 
 serve(async (req) => {
+  const requestOrigin = req.headers.get('Origin');
+  const corsHeaders = getCorsHeaders(requestOrigin);
+  
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }

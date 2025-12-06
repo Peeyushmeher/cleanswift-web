@@ -128,7 +128,7 @@ function LoginForm() {
       console.log('Fetching user profile...');
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('role, onboarding_completed')
+        .select('id, role, onboarding_completed')
         .eq('id', data.user.id)
         .single();
 
