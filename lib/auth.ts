@@ -112,11 +112,16 @@ export async function requireActiveDetailer() {
   const profile = await getUserProfile();
   
   if (!profile || (profile.role !== 'detailer' && profile.role !== 'admin')) {
+    console.error('requireActiveDetailer: Access denied', {
+      hasProfile: !!profile,
+      role: profile?.role,
+    });
     redirect('/auth/login');
   }
 
-  // Admins can always access
+  // Admins can always access detailer routes, even without a detailer record
   if (profile.role === 'admin') {
+    console.log('requireActiveDetailer: Admin access granted');
     return profile;
   }
 
@@ -135,14 +140,36 @@ export async function requireActiveDetailer() {
   }
 
   // Check detailer active status
-  const { data: detailer } = await supabase
+  // Use maybeSingle() to handle cases where record doesn't exist
+  const { data: detailer, error: detailerError } = await supabase
     .from('detailers')
     .select('is_active')
     .eq('profile_id', profile.id)
-    .single();
+    .maybeSingle();
+
+  // If query failed, try RPC function as fallback
+  if (detailerError && !detailer) {
+    console.warn('Detailer query failed in requireActiveDetailer, trying RPC fallback:', detailerError);
+    try {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_detailer_by_profile', {
+        p_profile_id: profile.id,
+      });
+      
+      if (!rpcError && rpcData) {
+        // Use RPC result
+        if (!rpcData.is_active) {
+          redirect('/detailer/pending');
+        }
+        return profile;
+      }
+    } catch (rpcErr) {
+      console.error('RPC fallback failed in requireActiveDetailer:', rpcErr);
+    }
+  }
 
   // If no detailer record, redirect to onboarding
   if (!detailer) {
+    console.warn('No detailer record found for profile:', profile.id);
     redirect('/onboard');
   }
 

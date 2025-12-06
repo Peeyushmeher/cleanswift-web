@@ -31,15 +31,15 @@ export default async function OnboardingPage() {
   const supabase = await createClient();
   
   // Check authentication - but allow unauthenticated users to start onboarding
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user }, error } = await supabase.auth.getUser();
   
   // If user is logged in and has completed onboarding, redirect to home
   // They'll need to wait for admin approval and log in again
-  if (session) {
+  if (!error && user) {
     const { data: profile } = await supabase
       .from('profiles')
       .select('id, role, onboarding_completed')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single();
 
     if (profile?.onboarding_completed) {

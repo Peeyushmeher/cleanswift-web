@@ -32,7 +32,7 @@ export default function Navigation() {
           <Link href="/#faq" className="text-slate-300 hover:text-white transition-colors">
             FAQ
           </Link>
-          <Link href="/auth/login" className="btn-secondary text-sm py-2 px-5">
+          <Link href="/auth/login?switch=true" className="btn-secondary text-sm py-2 px-5">
             Sign In
           </Link>
           <Link href="/onboard" className="btn-primary text-sm py-2 px-5">

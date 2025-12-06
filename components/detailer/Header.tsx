@@ -16,12 +16,12 @@ export default function Header() {
   useEffect(() => {
     // Fetch user profile
     const fetchUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (!error && user) {
         const { data: profile } = await supabase
           .from('profiles')
           .select('full_name')
-          .eq('id', session.user.id)
+          .eq('id', user.id)
           .single();
         
         if (profile?.full_name) {

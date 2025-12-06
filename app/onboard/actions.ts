@@ -226,18 +226,46 @@ export async function createDetailerProfile(
       return { success: false, error: 'Not authenticated. Please provide email and password.' };
     }
 
-    // Step 1: Update profile phone if needed (only if user is authenticated)
+    // Step 1: Update profile phone and ensure role is set (use service client to work without authentication)
     const { data: { user: currentUser } } = await supabase.auth.getUser();
-    if (currentUser) {
-      const { error: profileError } = await supabase
+    
+    // Use service client to update phone and role regardless of authentication status
+    try {
+      const serviceClient = createServiceClient();
+      const profileUpdate: any = {};
+      
+      // Always save phone number (database requires NOT NULL, so save even if empty string)
+      // Trim whitespace if provided, otherwise use empty string
+      profileUpdate.phone = (data.phone && data.phone.trim().length > 0) 
+        ? data.phone.trim() 
+        : '';
+      
+      // Ensure role is set to 'detailer' (the RPC should do this, but let's be explicit)
+      profileUpdate.role = 'detailer';
+      
+      console.log('Updating profile with phone and role:', { 
+        userId: user.id, 
+        phone: profileUpdate.phone || '(empty)', 
+        role: profileUpdate.role 
+      });
+      
+      const { error: profileError } = await serviceClient
         .from('profiles')
-        .update({ phone: data.phone })
+        .update(profileUpdate)
         .eq('id', user.id);
 
       if (profileError) {
-        console.error('Error updating profile phone:', profileError);
+        console.error('Error updating profile phone/role:', profileError);
         // Don't fail, continue with detailer creation
+      } else {
+        console.log('Successfully updated profile phone/role:', {
+          phone: profileUpdate.phone || '(empty)',
+          role: profileUpdate.role
+        });
       }
+    } catch (serviceError: any) {
+      console.error('Error creating service client for profile update:', serviceError);
+      // Don't fail, continue with detailer creation
     }
 
     // Step 2: Create detailer profile via RPC
@@ -401,42 +429,128 @@ export async function createDetailerProfile(
       // Don't fail the whole operation
     }
 
-    // Step 5: Create availability records if provided (only if authenticated)
-    if (data.availability && data.availability.length > 0 && currentUser) {
-      for (const slot of data.availability) {
-        const { error: availabilityError } = await supabase.rpc('set_detailer_availability', {
-          p_day_of_week: slot.day_of_week,
-          p_start_time: slot.start_time,
-          p_end_time: slot.end_time,
-          p_is_active: true,
-          p_lunch_start_time: slot.lunch_start_time || null,
-          p_lunch_end_time: slot.lunch_end_time || null,
-        });
+    // Step 5: Create availability records if provided (use service client to work without authentication)
+    if (data.availability && data.availability.length > 0) {
+      try {
+        const serviceClient = createServiceClient();
+        console.log('=== SAVING AVAILABILITY ===');
+        console.log('Detailer ID:', detailer.id);
+        console.log('Number of availability slots:', data.availability.length);
+        console.log('Availability data:', data.availability.map(slot => ({
+          day_of_week: slot.day_of_week,
+          start_time: slot.start_time,
+          end_time: slot.end_time,
+          lunch_start_time: slot.lunch_start_time || 'none',
+          lunch_end_time: slot.lunch_end_time || 'none',
+        })));
+        
+        // First, delete all existing availability for this detailer to avoid conflicts
+        // (onboarding replaces all availability, not just updates)
+        const { error: deleteError } = await serviceClient
+          .from('detailer_availability')
+          .delete()
+          .eq('detailer_id', detailer.id);
+        
+        if (deleteError) {
+          console.warn('Warning: Error deleting existing availability (may not exist):', deleteError);
+        } else {
+          console.log('Cleared existing availability slots');
+        }
+        
+        // Then insert all new availability slots
+        const availabilityData = data.availability.map(slot => ({
+          detailer_id: detailer.id,
+          day_of_week: slot.day_of_week,
+          start_time: slot.start_time,
+          end_time: slot.end_time,
+          is_active: true,
+          lunch_start_time: slot.lunch_start_time || null,
+          lunch_end_time: slot.lunch_end_time || null,
+        }));
+        
+        console.log('Inserting availability data:', availabilityData);
+        const { data: createdSlots, error: availabilityError } = await serviceClient
+          .from('detailer_availability')
+          .insert(availabilityData)
+          .select();
 
         if (availabilityError) {
-          console.error('Error creating availability slot:', availabilityError);
+          console.error('ERROR: Failed to create availability slots:', availabilityError);
+          console.error('Availability error details:', {
+            message: availabilityError.message,
+            details: availabilityError.details,
+            hint: availabilityError.hint,
+            code: availabilityError.code,
+          });
           // Don't fail the whole operation, availability can be added later
+        } else {
+          console.log(`✅ Successfully created ${createdSlots?.length || 0} availability slots`);
+          console.log('Created slots:', createdSlots);
         }
+        console.log('=== AVAILABILITY SAVE COMPLETE ===');
+      } catch (serviceError: any) {
+        console.error('ERROR: Exception creating service client for availability:', serviceError);
+        console.error('Service error details:', serviceError?.message, serviceError?.stack);
+        // Don't fail the whole operation
       }
-    } else if (data.availability && data.availability.length > 0) {
-      console.warn('Skipping availability creation - user not authenticated (email confirmation required). Availability can be added after email confirmation.');
+    } else {
+      console.log('=== AVAILABILITY SKIPPED ===');
+      console.log('No availability data provided or array is empty');
+      console.log('Availability data:', data.availability);
     }
 
-    // Step 5b: Create days off records if provided (only if authenticated)
-    if (data.daysOff && data.daysOff.length > 0 && currentUser) {
-      for (const dayOff of data.daysOff) {
-        const { error: dayOffError } = await supabase.rpc('add_detailer_day_off', {
-          p_date: dayOff.date,
-          p_reason: dayOff.reason || null,
-        });
+    // Step 5b: Create days off records if provided (use service client to work without authentication)
+    if (data.daysOff && data.daysOff.length > 0) {
+      try {
+        const serviceClient = createServiceClient();
+        console.log('=== SAVING DAYS OFF ===');
+        console.log('Detailer ID:', detailer.id);
+        console.log('Number of days off:', data.daysOff.length);
+        console.log('Days off data:', data.daysOff.map(dayOff => ({
+          date: dayOff.date,
+          reason: dayOff.reason || 'none',
+        })));
+        
+        // Prepare all days off data
+        const daysOffData = data.daysOff.map(dayOff => ({
+          detailer_id: detailer.id,
+          date: dayOff.date,
+          reason: dayOff.reason || null,
+          is_active: true, // Days off are active by default
+        }));
+        
+        console.log('Upserting days off data:', daysOffData);
+        // Upsert all days off (handles unique constraint on detailer_id, date)
+        const { data: createdDaysOff, error: dayOffError } = await serviceClient
+          .from('detailer_days_off')
+          .upsert(daysOffData, {
+            onConflict: 'detailer_id,date',
+          })
+          .select();
 
         if (dayOffError) {
-          console.error('Error creating day off:', dayOffError);
+          console.error('ERROR: Failed to create days off:', dayOffError);
+          console.error('Days off error details:', {
+            message: dayOffError.message,
+            details: dayOffError.details,
+            hint: dayOffError.hint,
+            code: dayOffError.code,
+          });
           // Don't fail the whole operation, days off can be added later
+        } else {
+          console.log(`✅ Successfully created ${createdDaysOff?.length || 0} days off records`);
+          console.log('Created days off:', createdDaysOff);
         }
+        console.log('=== DAYS OFF SAVE COMPLETE ===');
+      } catch (serviceError: any) {
+        console.error('ERROR: Exception creating service client for days off:', serviceError);
+        console.error('Service error details:', serviceError?.message, serviceError?.stack);
+        // Don't fail the whole operation
       }
-    } else if (data.daysOff && data.daysOff.length > 0) {
-      console.warn('Skipping days off creation - user not authenticated (email confirmation required). Days off can be added after email confirmation.');
+    } else {
+      console.log('=== DAYS OFF SKIPPED ===');
+      console.log('No days off data provided or array is empty');
+      console.log('Days off data:', data.daysOff);
     }
 
     // Step 6: Mark onboarding as completed using RPC (works without session)
@@ -445,8 +559,10 @@ export async function createDetailerProfile(
     });
 
     if (onboardingError) {
-      // If the RPC doesn't exist, try the direct update (might fail due to RLS)
-      const { error: directError } = await supabase
+      // If the RPC doesn't exist, try the direct update using service client
+      try {
+        const serviceClient = createServiceClient();
+        const { error: directError } = await serviceClient
         .from('profiles')
         .update({ onboarding_completed: true })
         .eq('id', user.id);
@@ -454,8 +570,92 @@ export async function createDetailerProfile(
       if (directError) {
         console.error('Error updating onboarding status:', directError);
         // Don't fail - this can be updated later
+        } else {
+          console.log('Successfully marked onboarding as completed');
+        }
+      } catch (serviceError: any) {
+        console.error('Error creating service client for onboarding completion:', serviceError);
       }
+    } else {
+      console.log('Successfully marked onboarding as completed via RPC');
     }
+
+    // Step 7: Log comprehensive summary of what was saved
+    console.log('');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('=== ONBOARDING DATA SAVE SUMMARY ===');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('User ID:', user.id);
+    console.log('Detailer ID:', detailer.id);
+    console.log('Email:', user.email);
+    console.log('');
+    console.log('📋 PROFILE DATA SAVED:');
+    console.log('  - Full Name:', data.full_name || 'not provided');
+    console.log('  - Phone:', data.phone ? data.phone.trim() : '(empty string saved)');
+    console.log('  - Role: detailer');
+    console.log('  - Onboarding Completed: true');
+    console.log('');
+    console.log('👤 DETAILER DATA SAVED:');
+    console.log('  - Full Name:', detailer.full_name);
+    console.log('  - Years Experience:', detailer.years_experience);
+    console.log('  - Bio:', data.bio ? `"${data.bio}"` : 'not provided');
+    console.log('  - Specialties:', data.specialties?.length || 0, 'items');
+    if (data.specialties && data.specialties.length > 0) {
+      console.log('    Specialties:', data.specialties.join(', '));
+    }
+    console.log('  - Service Radius:', data.service_radius_km || 50, 'km');
+    console.log('  - Pricing Model:', data.pricing_model || 'not set');
+    console.log('  - Location:', {
+      latitude: data.address?.latitude || 'not set',
+      longitude: data.address?.longitude || 'not set',
+    });
+    console.log('  - Is Active:', detailer.is_active);
+    console.log('');
+    console.log('📍 ADDRESS DATA SAVED:');
+    console.log('  - Address Line 1:', data.address?.address_line1 || 'not provided');
+    console.log('  - Address Line 2:', data.address?.address_line2 || 'none');
+    console.log('  - City:', data.address?.city || 'not provided');
+    console.log('  - Province:', data.address?.province || 'not provided');
+    console.log('  - Postal Code:', data.address?.postal_code || 'not provided');
+    console.log('  - Coordinates:', {
+      latitude: data.address?.latitude || 'not set',
+      longitude: data.address?.longitude || 'not set',
+    });
+    console.log('');
+    console.log('⏰ AVAILABILITY DATA SAVED:');
+    if (data.availability && data.availability.length > 0) {
+      console.log('  - Total Slots:', data.availability.length);
+      data.availability.forEach((slot, index) => {
+        console.log(`  - Slot ${index + 1}:`, {
+          day: slot.day_of_week,
+          start: slot.start_time,
+          end: slot.end_time,
+          lunch: slot.lunch_start_time && slot.lunch_end_time 
+            ? `${slot.lunch_start_time} - ${slot.lunch_end_time}` 
+            : 'none',
+        });
+      });
+    } else {
+      console.log('  - No availability slots provided');
+    }
+    console.log('');
+    console.log('📅 DAYS OFF DATA SAVED:');
+    if (data.daysOff && data.daysOff.length > 0) {
+      console.log('  - Total Days Off:', data.daysOff.length);
+      data.daysOff.forEach((dayOff, index) => {
+        console.log(`  - Day Off ${index + 1}:`, {
+          date: dayOff.date,
+          reason: dayOff.reason || 'none',
+        });
+      });
+    } else {
+      console.log('  - No days off provided');
+    }
+    console.log('');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('=== ONBOARDING SAVE COMPLETE ===');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('');
 
     return { success: true, detailerId: detailer.id };
   } catch (error: any) {
@@ -589,5 +789,166 @@ export async function createOrganization(
   } catch (error: any) {
     console.error('Error in createOrganization:', error);
     return { success: false, error: error.message || 'Failed to create organization' };
+  }
+}
+
+/**
+ * Verify all onboarding data was saved correctly for a detailer
+ * This function checks all tables to ensure data was saved properly
+ */
+export async function verifyOnboardingData(
+  detailerId: string
+): Promise<{
+  success: boolean;
+  data?: {
+    profile: any;
+    detailer: any;
+    address: any;
+    availability: any[];
+    daysOff: any[];
+  };
+  missing?: string[];
+  errors?: string[];
+}> {
+  try {
+    const serviceClient = createServiceClient();
+    const missing: string[] = [];
+    const errors: string[] = [];
+
+    // Get detailer record
+    const { data: detailer, error: detailerError } = await serviceClient
+      .from('detailers')
+      .select('*, profile:profiles(*)')
+      .eq('id', detailerId)
+      .single();
+
+    if (detailerError || !detailer) {
+      return {
+        success: false,
+        errors: [`Failed to fetch detailer: ${detailerError?.message || 'Not found'}`],
+      };
+    }
+
+    const profile = detailer.profile;
+    const verificationData: any = {
+      profile: null,
+      detailer: null,
+      address: null,
+      availability: [],
+      daysOff: [],
+    };
+
+    // Verify profile data
+    if (profile) {
+      verificationData.profile = {
+        id: profile.id,
+        email: profile.email,
+        full_name: profile.full_name,
+        phone: profile.phone || 'MISSING',
+        role: profile.role || 'MISSING',
+        onboarding_completed: profile.onboarding_completed,
+      };
+      if (!profile.phone) missing.push('Profile phone');
+      if (profile.role !== 'detailer') missing.push('Profile role (should be "detailer")');
+      if (!profile.onboarding_completed) missing.push('Onboarding completed flag');
+    } else {
+      missing.push('Profile record');
+    }
+
+    // Verify detailer data
+    verificationData.detailer = {
+      id: detailer.id,
+      full_name: detailer.full_name || 'MISSING',
+      years_experience: detailer.years_experience ?? 'MISSING',
+      bio: detailer.bio || 'MISSING',
+      specialties: detailer.specialties?.length || 0,
+      service_radius_km: detailer.service_radius_km ?? 'MISSING',
+      latitude: detailer.latitude || 'MISSING',
+      longitude: detailer.longitude || 'MISSING',
+      pricing_model: detailer.pricing_model || 'MISSING',
+    };
+    if (!detailer.full_name) missing.push('Detailer full_name');
+    if (detailer.years_experience === null || detailer.years_experience === undefined) missing.push('Detailer years_experience');
+    if (!detailer.bio) missing.push('Detailer bio');
+    if (!detailer.specialties || detailer.specialties.length === 0) missing.push('Detailer specialties');
+    if (!detailer.service_radius_km) missing.push('Detailer service_radius_km');
+    if (!detailer.latitude || !detailer.longitude) missing.push('Detailer location (latitude/longitude)');
+    if (!detailer.pricing_model) missing.push('Detailer pricing_model');
+
+    // Verify address
+    const { data: address, error: addressError } = await serviceClient
+      .from('user_addresses')
+      .select('*')
+      .eq('user_id', profile.id)
+      .eq('is_default', true)
+      .maybeSingle();
+
+    if (addressError) {
+      errors.push(`Error fetching address: ${addressError.message}`);
+    } else if (address) {
+      verificationData.address = {
+        address_line1: address.address_line1,
+        city: address.city,
+        province: address.province,
+        postal_code: address.postal_code,
+        latitude: address.latitude,
+        longitude: address.longitude,
+      };
+    } else {
+      missing.push('User address');
+    }
+
+    // Verify availability
+    const { data: availability, error: availabilityError } = await serviceClient
+      .from('detailer_availability')
+      .select('*')
+      .eq('detailer_id', detailerId)
+      .eq('is_active', true);
+
+    if (availabilityError) {
+      errors.push(`Error fetching availability: ${availabilityError.message}`);
+    } else if (availability && availability.length > 0) {
+      verificationData.availability = availability;
+    } else {
+      missing.push('Availability slots');
+    }
+
+    // Verify days off
+    const { data: daysOff, error: daysOffError } = await serviceClient
+      .from('detailer_days_off')
+      .select('*')
+      .eq('detailer_id', detailerId)
+      .eq('is_active', true);
+
+    if (daysOffError) {
+      errors.push(`Error fetching days off: ${daysOffError.message}`);
+    } else if (daysOff) {
+      verificationData.daysOff = daysOff;
+    }
+    // Days off are optional, so we don't add to missing if none exist
+
+    console.log('=== ONBOARDING DATA VERIFICATION ===');
+    console.log('Detailer ID:', detailerId);
+    console.log('Verification Data:', verificationData);
+    if (missing.length > 0) {
+      console.warn('Missing Data:', missing);
+    }
+    if (errors.length > 0) {
+      console.error('Errors:', errors);
+    }
+    console.log('=====================================');
+
+    return {
+      success: missing.length === 0 && errors.length === 0,
+      data: verificationData,
+      missing: missing.length > 0 ? missing : undefined,
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  } catch (error: any) {
+    console.error('Error in verifyOnboardingData:', error);
+    return {
+      success: false,
+      errors: [error.message || 'Failed to verify onboarding data'],
+    };
   }
 }
