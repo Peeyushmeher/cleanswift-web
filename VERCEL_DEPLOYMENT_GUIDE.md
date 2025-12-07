@@ -99,6 +99,10 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_here
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 
+# Site URL (for email confirmation links)
+NEXT_PUBLIC_SITE_URL=https://cleanswift.app
+# Or use your Vercel URL: https://your-project.vercel.app
+
 # Optional (if using Google Maps)
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_key
 ```
@@ -129,6 +133,31 @@ For each variable:
 1. Go to https://console.cloud.google.com
 2. Create API key or use existing
 3. Restrict to your Vercel domain
+
+### 3.4 Configure Supabase Site URL (IMPORTANT for Email Confirmation)
+
+**This is critical for email confirmation links to work correctly!**
+
+1. Go to **Supabase Dashboard** → **Authentication** → **URL Configuration**
+2. Set **Site URL** to your production domain:
+   ```
+   https://cleanswift.app
+   ```
+   Or if using Vercel URL:
+   ```
+   https://your-project.vercel.app
+   ```
+3. Add **Redirect URLs** (if not already present):
+   ```
+   https://cleanswift.app/**
+   https://your-project.vercel.app/**
+   ```
+4. Click **Save**
+
+**⚠️ Why this matters:**
+- Email confirmation links will redirect to this URL
+- Without this, users clicking confirmation emails will be redirected to `localhost:3000`
+- This must match your production domain
 
 ---
 
@@ -370,6 +399,14 @@ Preview deployments are enabled by default:
 - ✅ Include your Vercel domain in the list
 
 ### Authentication Issues
+
+**Email confirmation redirects to localhost:3000**
+- ✅ **Solution:** Configure Supabase Site URL (see Step 3.4)
+  1. Go to Supabase Dashboard → Authentication → URL Configuration
+  2. Set Site URL to `https://cleanswift.app` (or your production domain)
+  3. Add redirect URLs: `https://cleanswift.app/**`
+  4. Also set `NEXT_PUBLIC_SITE_URL` environment variable in Vercel
+  5. Redeploy your application
 
 **Redirects not working**
 - ✅ Check middleware is deployed correctly

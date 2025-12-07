@@ -35,11 +35,15 @@ function SignUpForm() {
     setError(null);
 
     try {
+      // Get the site URL from environment variable or use current origin
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+      
       // Sign up the user
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          emailRedirectTo: `${siteUrl}/auth/login`,
           data: {
             full_name: fullName,
             phone: phone,

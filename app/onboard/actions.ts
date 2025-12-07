@@ -187,10 +187,14 @@ export async function createDetailerProfile(
     
     // If user is not authenticated and we have email/password, create account
     if (!user && data.email && data.password) {
+      // Get the site URL from environment variable
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://cleanswift.app';
+      
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
         options: {
+          emailRedirectTo: `${siteUrl}/auth/login`,
           data: {
             full_name: data.full_name,
             phone: data.phone,
@@ -676,10 +680,14 @@ export async function createOrganization(
     
     // If user is not authenticated and we have email/password, create account
     if (!user && data.email && data.password) {
+      // Get the site URL from environment variable
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://cleanswift.app';
+      
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
         options: {
+          emailRedirectTo: `${siteUrl}/auth/login`,
           data: {
             full_name: data.owner_detailer.full_name,
             phone: data.owner_detailer.phone,
