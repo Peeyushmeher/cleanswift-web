@@ -44,9 +44,16 @@ SUPABASE_SERVICE_ROLE_KEY=eyJxxx...
 - [ ] Added `NEXT_PUBLIC_SUPABASE_URL`
 - [ ] Added `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - [ ] Added `SUPABASE_SERVICE_ROLE_KEY`
+- [ ] Added `NEXT_PUBLIC_SITE_URL` (e.g., `https://cleanswift.app`)
 - [ ] Added `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` (if using)
 - [ ] Redeployed with environment variables
 - [ ] Build successful
+
+### Supabase Authentication Configuration
+- [ ] Configured Site URL in Supabase Dashboard
+  - Go to Authentication → URL Configuration
+  - Set Site URL to `https://cleanswift.app` (or your production domain)
+  - Add Redirect URLs: `https://cleanswift.app/**`
 
 ### Supabase Edge Functions
 - [ ] Deployed `create-payment-intent`
@@ -94,6 +101,7 @@ SUPABASE_SERVICE_ROLE_KEY=eyJxxx...
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJxxx...
 SUPABASE_SERVICE_ROLE_KEY=eyJxxx...
+NEXT_PUBLIC_SITE_URL=https://cleanswift.app
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=xxx (optional)
 ```
 
@@ -119,6 +127,7 @@ ENABLE_TEST_PAYMENTS=false
 | "Module not found" | Run `npm install` locally, check `package.json` |
 | CORS errors | Set `ALLOWED_ORIGINS` in Supabase Edge Functions |
 | Auth not working | Verify Supabase URL and keys are correct |
+| Email confirmation redirects to localhost | Configure Site URL in Supabase Dashboard (Authentication → URL Configuration) |
 | Webhook not receiving | Check webhook URL and secret in Stripe |
 
 ---
