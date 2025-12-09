@@ -53,10 +53,14 @@ serve(async (req) => {
       );
     }
 
-    // Get webhook secret from environment
+    // Get webhook secrets from environment (support multiple endpoints)
+    // STRIPE_WEBHOOK_SECRET: For regular payment events
+    // STRIPE_CONNECT_WEBHOOK_SECRET: For Stripe Connect transfer events (optional)
     const webhookSecret = Deno.env.get('STRIPE_WEBHOOK_SECRET');
-    if (!webhookSecret) {
-      console.error('❌ STRIPE_WEBHOOK_SECRET not configured');
+    const connectWebhookSecret = Deno.env.get('STRIPE_CONNECT_WEBHOOK_SECRET');
+    
+    if (!webhookSecret && !connectWebhookSecret) {
+      console.error('❌ No webhook secrets configured');
       return new Response(
         JSON.stringify({ error: 'Webhook secret not configured' }),
         {
@@ -97,28 +101,53 @@ serve(async (req) => {
       httpClient: Stripe.createFetchHttpClient(),
     });
 
-    // Verify webhook signature
+    // Verify webhook signature (try both secrets if both are configured)
     let event: Stripe.Event;
-    try {
-      event = stripe.webhooks.constructEvent(
-        rawBody,
-        stripeSignature,
-        webhookSecret
-      );
-      console.log('✅ Webhook signature verified');
-      console.log('Event type:', event.type);
-      console.log('Event ID:', event.id);
-    } catch (err) {
-      console.error('⚠️  Webhook signature verification failed:', err);
-      const errorMessage = err instanceof Error ? err.message : String(err);
+    let verified = false;
+    
+    // Try regular webhook secret first
+    if (webhookSecret) {
+      try {
+        event = stripe.webhooks.constructEvent(
+          rawBody,
+          stripeSignature,
+          webhookSecret
+        );
+        console.log('✅ Webhook signature verified with STRIPE_WEBHOOK_SECRET');
+        verified = true;
+      } catch (err) {
+        console.log('⚠️  Regular webhook secret failed, trying Connect secret...');
+      }
+    }
+    
+    // Try Connect webhook secret if regular one failed or doesn't exist
+    if (!verified && connectWebhookSecret) {
+      try {
+        event = stripe.webhooks.constructEvent(
+          rawBody,
+          stripeSignature,
+          connectWebhookSecret
+        );
+        console.log('✅ Webhook signature verified with STRIPE_CONNECT_WEBHOOK_SECRET');
+        verified = true;
+      } catch (err) {
+        console.error('⚠️  Connect webhook secret also failed');
+      }
+    }
+    
+    if (!verified) {
+      console.error('❌ Webhook signature verification failed with all configured secrets');
       return new Response(
-        JSON.stringify({ error: `Webhook signature verification failed: ${errorMessage}` }),
+        JSON.stringify({ error: 'Webhook signature verification failed' }),
         {
           status: 400,
           headers: { 'Content-Type': 'application/json' },
         }
       );
     }
+    
+    console.log('Event type:', event.type);
+    console.log('Event ID:', event.id);
 
     // Initialize Supabase client with service role key (bypasses RLS)
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -192,6 +221,27 @@ serve(async (req) => {
         {
           const invoice = event.data.object as Stripe.Invoice;
           await handleInvoicePaymentFailed(supabase, invoice);
+        }
+        break;
+
+      case 'transfer.created':
+        {
+          const transfer = event.data.object as Stripe.Transfer;
+          await handleTransferCreated(supabase, transfer);
+        }
+        break;
+
+      case 'transfer.paid':
+        {
+          const transfer = event.data.object as Stripe.Transfer;
+          await handleTransferPaid(supabase, transfer);
+        }
+        break;
+
+      case 'transfer.failed':
+        {
+          const transfer = event.data.object as Stripe.Transfer;
+          await handleTransferFailed(supabase, transfer);
         }
         break;
 
@@ -679,5 +729,186 @@ async function handleInvoicePaymentFailed(
 
   console.log(`⚠️  Subscription payment failed for detailer: ${detailer.full_name} (${detailer.id})`);
   // Additional logic can be added here (e.g., notifications, status updates)
+}
+
+/**
+ * Handle transfer.created event
+ * - Update transfer status to 'processing'
+ */
+async function handleTransferCreated(
+  supabase: ReturnType<typeof createClient>,
+  transfer: Stripe.Transfer
+) {
+  console.log('🟢 Processing transfer.created');
+  console.log('Transfer ID:', transfer.id);
+  console.log('Amount:', transfer.amount, 'cents');
+  console.log('Destination:', transfer.destination);
+
+  const transferId = transfer.metadata?.transfer_id;
+  if (!transferId) {
+    console.log('ℹ️  Transfer does not have transfer_id in metadata, skipping');
+    return;
+  }
+
+  // Update transfer record status to 'processing'
+  const { error: updateError } = await supabase
+    .from('detailer_transfers')
+    .update({
+      status: 'processing',
+      stripe_transfer_id: transfer.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', transferId);
+
+  if (updateError) {
+    console.error('❌ Failed to update transfer status:', updateError);
+  } else {
+    console.log('✅ Updated transfer status to "processing"');
+  }
+}
+
+/**
+ * Handle transfer.paid event
+ * - Update transfer status to 'succeeded'
+ */
+async function handleTransferPaid(
+  supabase: ReturnType<typeof createClient>,
+  transfer: Stripe.Transfer
+) {
+  console.log('🟢 Processing transfer.paid');
+  console.log('Transfer ID:', transfer.id);
+  console.log('Amount:', transfer.amount, 'cents');
+
+  const transferId = transfer.metadata?.transfer_id;
+  if (!transferId) {
+    // Try to find by stripe_transfer_id if metadata doesn't have transfer_id
+    const { data: transferRecord, error: findError } = await supabase
+      .from('detailer_transfers')
+      .select('id')
+      .eq('stripe_transfer_id', transfer.id)
+      .single();
+
+    if (findError || !transferRecord) {
+      console.log('ℹ️  Transfer record not found for Stripe transfer:', transfer.id);
+      return;
+    }
+
+    // Update using found transfer record ID
+    const { error: updateError } = await supabase
+      .from('detailer_transfers')
+      .update({
+        status: 'succeeded',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', transferRecord.id);
+
+    if (updateError) {
+      console.error('❌ Failed to update transfer status:', updateError);
+    } else {
+      console.log('✅ Updated transfer status to "succeeded"');
+    }
+    return;
+  }
+
+  // Update transfer record status to 'succeeded'
+  const { error: updateError } = await supabase
+    .from('detailer_transfers')
+    .update({
+      status: 'succeeded',
+      stripe_transfer_id: transfer.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', transferId);
+
+  if (updateError) {
+    console.error('❌ Failed to update transfer status:', updateError);
+  } else {
+    console.log('✅ Updated transfer status to "succeeded"');
+  }
+}
+
+/**
+ * Handle transfer.failed event
+ * - Update transfer status to 'failed' or 'retry_pending' based on retry count
+ */
+async function handleTransferFailed(
+  supabase: ReturnType<typeof createClient>,
+  transfer: Stripe.Transfer
+) {
+  console.log('🔴 Processing transfer.failed');
+  console.log('Transfer ID:', transfer.id);
+  console.log('Failure code:', transfer.failure_code);
+  console.log('Failure message:', transfer.failure_message);
+
+  const transferId = transfer.metadata?.transfer_id;
+  if (!transferId) {
+    // Try to find by stripe_transfer_id
+    const { data: transferRecord, error: findError } = await supabase
+      .from('detailer_transfers')
+      .select('id, retry_count')
+      .eq('stripe_transfer_id', transfer.id)
+      .single();
+
+    if (findError || !transferRecord) {
+      console.log('ℹ️  Transfer record not found for Stripe transfer:', transfer.id);
+      return;
+    }
+
+    const errorMessage = transfer.failure_message || transfer.failure_code || 'Transfer failed';
+    const newRetryCount = (transferRecord.retry_count || 0) + 1;
+    const MAX_RETRIES = 3;
+
+    // Update transfer record
+    const { error: updateError } = await supabase
+      .from('detailer_transfers')
+      .update({
+        status: newRetryCount < MAX_RETRIES ? 'retry_pending' : 'failed',
+        error_message: errorMessage,
+        retry_count: newRetryCount,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', transferRecord.id);
+
+    if (updateError) {
+      console.error('❌ Failed to update transfer status:', updateError);
+    } else {
+      console.log(`✅ Updated transfer status to "${newRetryCount < MAX_RETRIES ? 'retry_pending' : 'failed'}"`);
+    }
+    return;
+  }
+
+  // Get current transfer record to check retry count
+  const { data: transferRecord, error: fetchError } = await supabase
+    .from('detailer_transfers')
+    .select('id, retry_count')
+    .eq('id', transferId)
+    .single();
+
+  if (fetchError || !transferRecord) {
+    console.error('⚠️  Transfer record not found:', transferId);
+    return;
+  }
+
+  const errorMessage = transfer.failure_message || transfer.failure_code || 'Transfer failed';
+  const newRetryCount = (transferRecord.retry_count || 0) + 1;
+  const MAX_RETRIES = 3;
+
+  // Update transfer record
+  const { error: updateError } = await supabase
+    .from('detailer_transfers')
+    .update({
+      status: newRetryCount < MAX_RETRIES ? 'retry_pending' : 'failed',
+      error_message: errorMessage,
+      retry_count: newRetryCount,
+      stripe_transfer_id: transfer.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', transferId);
+
+  if (updateError) {
+    console.error('❌ Failed to update transfer status:', updateError);
+  } else {
+    console.log(`✅ Updated transfer status to "${newRetryCount < MAX_RETRIES ? 'retry_pending' : 'failed'}" (retry ${newRetryCount}/${MAX_RETRIES})`);
+  }
 }
 

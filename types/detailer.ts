@@ -164,3 +164,30 @@ export interface DashboardStats {
   totalEarnings: number;
 }
 
+export interface DetailerTransfer {
+  id: string;
+  booking_id: string;
+  detailer_id: string;
+  amount_cents: number;
+  platform_fee_cents: number;
+  stripe_transfer_id: string | null;
+  status: 'pending' | 'processing' | 'succeeded' | 'failed' | 'retry_pending';
+  error_message: string | null;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+  booking?: {
+    id: string;
+    receipt_id: string;
+    total_amount: number;
+    completed_at: string;
+    service?: { name: string };
+  };
+}
+
+export interface TransferStats {
+  totalTransferred: number;
+  pendingTransfers: number;
+  failedTransfers: number;
+}
+

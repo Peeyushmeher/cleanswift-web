@@ -6,6 +6,7 @@ import EarningsChart from '@/components/detailer/EarningsChart';
 import OrgEarningsSummary from '@/components/detailer/OrgEarningsSummary';
 import TeamEarningsBreakdown from '@/components/detailer/TeamEarningsBreakdown';
 import PayoutBatches from '@/components/detailer/PayoutBatches';
+import TransferHistory from '@/components/detailer/TransferHistory';
 
 interface EarningsPageClientProps {
   earningsData: any[];
@@ -21,6 +22,12 @@ interface EarningsPageClientProps {
   teamEarnings?: Array<{ name: string; revenue: number; jobs: number }>;
   payoutBatches?: any[];
   platformFeePercentage?: number;
+  transfers?: any[];
+  transferStats?: {
+    totalTransferred: number;
+    pendingTransfers: number;
+    failedTransfers: number;
+  };
 }
 
 export default function EarningsPageClient({
@@ -32,6 +39,8 @@ export default function EarningsPageClient({
   teamEarnings = [],
   payoutBatches = [],
   platformFeePercentage = 15,
+  transfers = [],
+  transferStats,
 }: EarningsPageClientProps) {
   const [period, setPeriod] = useState<'day' | 'week' | 'month'>('day');
 
@@ -70,7 +79,9 @@ export default function EarningsPageClient({
         <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
           <div className="text-[#C6CFD9] text-sm mb-2">Next Payout</div>
           <div className="text-lg font-semibold text-[#C6CFD9]">
-            TBD (Stripe Connect)
+            {transferStats && transferStats.pendingTransfers > 0
+              ? formatCurrency(transferStats.pendingTransfers)
+              : 'On-demand'}
           </div>
         </div>
         </div>
@@ -84,6 +95,11 @@ export default function EarningsPageClient({
       {/* Payout Batches (Org Mode) */}
       {isOrgMode && payoutBatches.length > 0 && (
         <PayoutBatches batches={payoutBatches} />
+      )}
+
+      {/* Transfer History (Solo Mode) */}
+      {!isOrgMode && transfers && transfers.length > 0 && transferStats && (
+        <TransferHistory transfers={transfers} stats={transferStats} />
       )}
 
       {/* Earnings Chart */}
@@ -117,12 +133,21 @@ export default function EarningsPageClient({
                 <th className="px-4 py-3 text-left text-xs font-semibold text-[#C6CFD9] uppercase">
                   Payout
                 </th>
+                {!isOrgMode && transfers && transfers.length > 0 && (
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-[#C6CFD9] uppercase">
+                    Transfer Status
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {earningsData.map((booking) => {
                 const amount = booking.total_amount || booking.service_price || 0;
                 const payout = amount * (1 - platformFeePercentage / 100);
+                
+                // Find transfer for this booking
+                const transfer = transfers?.find((t: any) => t.booking_id === booking.id);
+                
                 return (
                   <tr key={booking.id} className="hover:bg-white/5">
                     <td className="px-4 py-3 text-sm text-white">
@@ -143,6 +168,35 @@ export default function EarningsPageClient({
                     <td className="px-4 py-3 text-sm text-[#32CE7A] font-semibold">
                       {formatCurrency(payout)}
                     </td>
+                    {!isOrgMode && transfers && transfers.length > 0 && (
+                      <td className="px-4 py-3 text-sm">
+                        {transfer ? (
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-medium ${
+                              transfer.status === 'succeeded'
+                                ? 'bg-[#32CE7A]/20 text-[#32CE7A]'
+                                : transfer.status === 'processing'
+                                ? 'bg-blue-500/20 text-blue-400'
+                                : transfer.status === 'pending' || transfer.status === 'retry_pending'
+                                ? 'bg-yellow-500/20 text-yellow-400'
+                                : 'bg-red-500/20 text-red-400'
+                            }`}
+                          >
+                            {transfer.status === 'succeeded'
+                              ? 'Paid'
+                              : transfer.status === 'processing'
+                              ? 'Processing'
+                              : transfer.status === 'pending'
+                              ? 'Pending'
+                              : transfer.status === 'retry_pending'
+                              ? 'Retrying'
+                              : 'Failed'}
+                          </span>
+                        ) : (
+                          <span className="text-[#C6CFD9] text-xs">—</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}

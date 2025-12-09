@@ -42,24 +42,36 @@ export default async function AdminServicesPage() {
     const price = parseFloat(formData.get('price') as string);
     const duration = parseInt(formData.get('duration_minutes') as string) || 60;
     
-    if (!name || !price) return;
+    if (!name || !price) {
+      console.error('Create service: Missing required fields', { name, price });
+      return;
+    }
 
     // Get max display_order
-    const { data: maxOrder } = await supabase
+    const { data: maxOrder, error: maxOrderError } = await supabase
       .from('services')
       .select('display_order')
       .order('display_order', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
-    await supabase.from('services').insert({
+    if (maxOrderError) {
+      console.error('Create service: Error fetching max display_order', maxOrderError);
+    }
+
+    const { error: insertError } = await supabase.from('services').insert({
       name,
-      description: description || null,
+      description: description || '',
       price,
       duration_minutes: duration,
       display_order: (maxOrder?.display_order || 0) + 1,
       is_active: true,
     });
+    
+    if (insertError) {
+      console.error('Create service: Error inserting service', insertError);
+      throw new Error(`Failed to create service: ${insertError.message}`);
+    }
     
     revalidatePath('/admin/services');
   }
@@ -75,19 +87,27 @@ export default async function AdminServicesPage() {
     const duration = parseInt(formData.get('duration_minutes') as string);
     const isActive = formData.get('is_active') === 'true';
     
-    if (!id || !name || !price) return;
+    if (!id || !name || !price) {
+      console.error('Update service: Missing required fields', { id, name, price });
+      return;
+    }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('services')
       .update({
         name,
-        description: description || null,
+        description: description || '',
         price,
         duration_minutes: duration,
         is_active: isActive,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id);
+    
+    if (updateError) {
+      console.error('Update service: Error updating service', updateError);
+      throw new Error(`Failed to update service: ${updateError.message}`);
+    }
     
     revalidatePath('/admin/services');
   }
@@ -99,15 +119,23 @@ export default async function AdminServicesPage() {
     const id = formData.get('id') as string;
     const currentStatus = formData.get('current_status') === 'true';
     
-    if (!id) return;
+    if (!id) {
+      console.error('Toggle service: Missing service ID');
+      return;
+    }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('services')
       .update({ 
         is_active: !currentStatus,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id);
+    
+    if (updateError) {
+      console.error('Toggle service: Error toggling service status', updateError);
+      throw new Error(`Failed to toggle service status: ${updateError.message}`);
+    }
     
     revalidatePath('/admin/services');
   }
@@ -117,9 +145,18 @@ export default async function AdminServicesPage() {
     const supabase = await createClient();
     
     const id = formData.get('id') as string;
-    if (!id) return;
+    if (!id) {
+      console.error('Delete service: Missing service ID');
+      return;
+    }
 
-    await supabase.from('services').delete().eq('id', id);
+    const { error: deleteError } = await supabase.from('services').delete().eq('id', id);
+    
+    if (deleteError) {
+      console.error('Delete service: Error deleting service', deleteError);
+      throw new Error(`Failed to delete service: ${deleteError.message}`);
+    }
+    
     revalidatePath('/admin/services');
   }
 
@@ -132,23 +169,35 @@ export default async function AdminServicesPage() {
     const description = formData.get('description') as string;
     const price = parseFloat(formData.get('price') as string);
     
-    if (!name || !price) return;
+    if (!name || !price) {
+      console.error('Create addon: Missing required fields', { name, price });
+      return;
+    }
 
     // Get max display_order
-    const { data: maxOrder } = await supabase
+    const { data: maxOrder, error: maxOrderError } = await supabase
       .from('service_addons')
       .select('display_order')
       .order('display_order', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
-    await supabase.from('service_addons').insert({
+    if (maxOrderError) {
+      console.error('Create addon: Error fetching max display_order', maxOrderError);
+    }
+
+    const { error: insertError } = await supabase.from('service_addons').insert({
       name,
-      description: description || null,
+      description: description || '',
       price,
       display_order: (maxOrder?.display_order || 0) + 1,
       is_active: true,
     });
+    
+    if (insertError) {
+      console.error('Create addon: Error inserting addon', insertError);
+      throw new Error(`Failed to create add-on: ${insertError.message}`);
+    }
     
     revalidatePath('/admin/services');
   }
@@ -163,18 +212,26 @@ export default async function AdminServicesPage() {
     const price = parseFloat(formData.get('price') as string);
     const isActive = formData.get('is_active') === 'true';
     
-    if (!id || !name || !price) return;
+    if (!id || !name || !price) {
+      console.error('Update addon: Missing required fields', { id, name, price });
+      return;
+    }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('service_addons')
       .update({
         name,
-        description: description || null,
+        description: description || '',
         price,
         is_active: isActive,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id);
+    
+    if (updateError) {
+      console.error('Update addon: Error updating addon', updateError);
+      throw new Error(`Failed to update add-on: ${updateError.message}`);
+    }
     
     revalidatePath('/admin/services');
   }
@@ -186,15 +243,23 @@ export default async function AdminServicesPage() {
     const id = formData.get('id') as string;
     const currentStatus = formData.get('current_status') === 'true';
     
-    if (!id) return;
+    if (!id) {
+      console.error('Toggle addon: Missing addon ID');
+      return;
+    }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('service_addons')
       .update({ 
         is_active: !currentStatus,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id);
+    
+    if (updateError) {
+      console.error('Toggle addon: Error toggling addon status', updateError);
+      throw new Error(`Failed to toggle add-on status: ${updateError.message}`);
+    }
     
     revalidatePath('/admin/services');
   }
@@ -204,9 +269,18 @@ export default async function AdminServicesPage() {
     const supabase = await createClient();
     
     const id = formData.get('id') as string;
-    if (!id) return;
+    if (!id) {
+      console.error('Delete addon: Missing addon ID');
+      return;
+    }
 
-    await supabase.from('service_addons').delete().eq('id', id);
+    const { error: deleteError } = await supabase.from('service_addons').delete().eq('id', id);
+    
+    if (deleteError) {
+      console.error('Delete addon: Error deleting addon', deleteError);
+      throw new Error(`Failed to delete add-on: ${deleteError.message}`);
+    }
+    
     revalidatePath('/admin/services');
   }
 
