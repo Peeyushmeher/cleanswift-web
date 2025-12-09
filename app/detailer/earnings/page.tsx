@@ -25,6 +25,16 @@ export default async function EarningsPage() {
   let teamEarnings: any[] = [];
   let detailerPayouts: any[] = [];
   let payoutBatches: any[] = [];
+  let transfers: any[] = [];
+  let transferStats: {
+    totalTransferred: number;
+    pendingTransfers: number;
+    failedTransfers: number;
+  } = {
+    totalTransferred: 0,
+    pendingTransfers: 0,
+    failedTransfers: 0,
+  };
 
   if (canViewOrg && organization) {
     // Organization mode: Get org-wide earnings
@@ -133,6 +143,48 @@ export default async function EarningsPage() {
     totalEarnings = earningsData.reduce((sum, b) => sum + (b.total_amount || b.service_price || 0), 0);
     // Use detailer-specific platform fee calculation
     pendingPayouts = await calculateDetailerPayout(totalEarnings, undefined, detailerData.id);
+
+    // Fetch transfer data for solo detailers
+    if (mode === 'solo') {
+      const { data: transferData } = await supabase
+        .from('detailer_transfers')
+        .select(`
+          *,
+          booking:bookings (
+            id,
+            receipt_id,
+            total_amount,
+            completed_at,
+            service:service_id (name)
+          )
+        `)
+        .eq('detailer_id', detailerData.id)
+        .order('created_at', { ascending: false });
+
+      transfers = transferData || [];
+
+      // Calculate transfer stats
+      const totalTransferred = transfers
+        .filter((t: any) => t.status === 'succeeded')
+        .reduce((sum: number, t: any) => sum + (t.amount_cents / 100), 0);
+
+      const pendingTransfers = transfers
+        .filter((t: any) => ['pending', 'processing', 'retry_pending'].includes(t.status))
+        .reduce((sum: number, t: any) => sum + (t.amount_cents / 100), 0);
+
+      const failedTransfers = transfers.filter((t: any) => t.status === 'failed').length;
+
+      transferStats = {
+        totalTransferred,
+        pendingTransfers,
+        failedTransfers,
+      };
+
+      // Update pendingPayouts to show actual pending transfers if available
+      if (pendingTransfers > 0) {
+        pendingPayouts = pendingTransfers;
+      }
+    }
   }
 
   return (
@@ -152,6 +204,8 @@ export default async function EarningsPage() {
           teamEarnings={teamEarnings}
           payoutBatches={payoutBatches}
           platformFeePercentage={await getPlatformFeePercentage()}
+          transfers={transfers}
+          transferStats={transferStats}
         />
       </div>
     </div>
