@@ -25,9 +25,10 @@ export default function Footer() {
           </Link>
           
           <div className="flex items-center gap-6 text-sm text-slate-400">
-            <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
-            <a href="#" className="hover:text-white transition-colors">Contact</a>
+            <Link href="/privacy-policy" className="hover:text-white transition-colors">Privacy Policy</Link>
+            <Link href="/terms-of-service" className="hover:text-white transition-colors">Terms of Service</Link>
+            <Link href="/refund-policy" className="hover:text-white transition-colors">Refund Policy</Link>
+            <a href="mailto:support@cleanswift.app" className="hover:text-white transition-colors">Contact</a>
           </div>
           
           <p className="text-sm text-slate-500">
