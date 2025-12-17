@@ -262,10 +262,15 @@ export default async function AdminBookingDetailPage({ params }: { params: Promi
   // Calculate platform fee using detailer's pricing model
   const { calculatePlatformFee, calculateDetailerPayout } = await import('@/lib/platform-settings');
   const detailerId = bookingRaw.detailer_id;
-  const totalAmount = parseFloat(booking.total_amount || '0');
-  const platformFee = await calculatePlatformFee(totalAmount, undefined, detailerId);
-  const detailerPayout = await calculateDetailerPayout(totalAmount, undefined, detailerId);
-  const platformFeePercent = totalAmount > 0 ? (platformFee / totalAmount) * 100 : 0;
+  // Platform fee is calculated on service_price (not total_amount which includes Stripe fees)
+  const servicePrice = parseFloat(booking.service_price || booking.total_amount || '0');
+  const platformFee = await calculatePlatformFee(servicePrice, undefined, detailerId);
+  const detailerPayout = servicePrice - platformFee;
+  const platformFeePercent = servicePrice > 0 ? (platformFee / servicePrice) * 100 : 0;
+  
+  // Ensure Stripe fees are numbers
+  const stripeProcessingFee = parseFloat(booking.stripe_processing_fee || '0');
+  const stripeConnectFee = parseFloat(booking.stripe_connect_fee || '0');
 
   return (
     <div className="p-6 lg:p-8">
@@ -437,6 +442,22 @@ export default async function AdminBookingDetailPage({ params }: { params: Promi
                   <span className="text-[#C6CFD9]">Tax</span>
                   <span className="text-white">${booking.tax_amount}</span>
                 </div>
+                {(stripeProcessingFee > 0 || stripeConnectFee > 0) && (
+                  <>
+                    {stripeProcessingFee > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-[#C6CFD9]">Payment Processing Fee (2.9% + $0.30)</span>
+                        <span className="text-white">${stripeProcessingFee.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {stripeConnectFee > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-[#C6CFD9]">Payout Fee (0.25% + $0.25)</span>
+                        <span className="text-white">${stripeConnectFee.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </>
+                )}
                 <div className="flex justify-between font-semibold pt-2 border-t border-white/5">
                   <span className="text-white">Total</span>
                   <span className="text-[#32CE7A]">${booking.total_amount}</span>

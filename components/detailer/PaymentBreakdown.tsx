@@ -8,6 +8,8 @@ interface PaymentBreakdownProps {
   tipAmount?: number;
   platformFee?: number;
   platformFeePercentage?: number;
+  stripeProcessingFee?: number;
+  stripeConnectFee?: number;
 }
 
 export default function PaymentBreakdown({
@@ -18,10 +20,17 @@ export default function PaymentBreakdown({
   tipAmount = 0,
   platformFee,
   platformFeePercentage = 15,
+  stripeProcessingFee = 0,
+  stripeConnectFee = 0,
 }: PaymentBreakdownProps) {
-  // Calculate platform fee if not provided
-  const calculatedPlatformFee = platformFee ?? (totalAmount * platformFeePercentage) / 100;
-  const payoutAmount = totalAmount - calculatedPlatformFee;
+  // Calculate platform fee based on service price (not including Stripe fees)
+  // Platform fee is calculated on the base service amount, not the total with fees
+  const baseAmount = servicePrice + addonsTotal;
+  const calculatedPlatformFee = platformFee ?? (baseAmount * platformFeePercentage) / 100;
+  const payoutAmount = baseAmount - calculatedPlatformFee;
+  
+  // Calculate total Stripe fees
+  const totalStripeFees = (stripeProcessingFee || 0) + (stripeConnectFee || 0);
 
   return (
     <div className="space-y-2">
@@ -47,6 +56,22 @@ export default function PaymentBreakdown({
           <span>Tax:</span>
           <span className="text-white">{formatCurrency(taxAmount)}</span>
         </div>
+        {totalStripeFees > 0 && (
+          <>
+            {stripeProcessingFee > 0 && (
+              <div className="flex justify-between text-[#C6CFD9]">
+                <span>Payment Processing Fee (2.9% + $0.30):</span>
+                <span className="text-white">{formatCurrency(stripeProcessingFee)}</span>
+              </div>
+            )}
+            {stripeConnectFee > 0 && (
+              <div className="flex justify-between text-[#C6CFD9]">
+                <span>Payout Fee (0.25% + $0.25):</span>
+                <span className="text-white">{formatCurrency(stripeConnectFee)}</span>
+              </div>
+            )}
+          </>
+        )}
         <div className="border-t border-white/10 pt-2 mt-2">
           <div className="flex justify-between text-white font-semibold">
             <span>Total:</span>
