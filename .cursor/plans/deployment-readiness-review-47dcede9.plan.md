@@ -1,4 +1,9 @@
-<!-- 47dcede9-318d-47fd-bae3-9d1da1d3bd9a 8eea5fe2-294f-4137-8735-12f03ec5cd77 -->
+---
+name: Deployment Readiness Review Plan
+overview: ""
+todos: []
+---
+
 # Deployment Readiness Review Plan
 
 ## Critical Issues Found

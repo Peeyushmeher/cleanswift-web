@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ContactCustomer from '@/components/detailer/ContactCustomer';
 import JobMap from '@/components/detailer/JobMap';
@@ -10,6 +10,7 @@ import PaymentBreakdown from '@/components/detailer/PaymentBreakdown';
 import PhotoUpload from '@/components/detailer/PhotoUpload';
 import StatusBadge from '@/components/ui/StatusBadge';
 import JobAssignmentModal from '@/components/detailer/JobAssignmentModal';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { createClient } from '@/lib/supabase/client';
 
 interface BookingDetailClientProps {
@@ -36,24 +37,115 @@ export default function BookingDetailClient({
   platformFeePercentage = 15,
 }: BookingDetailClientProps) {
   const [assignmentModalOpen, setAssignmentModalOpen] = useState(false);
+  const [statusUpdateLoading, setStatusUpdateLoading] = useState(false);
+  const [statusUpdateError, setStatusUpdateError] = useState<string | null>(null);
+  const [statusUpdateSuccess, setStatusUpdateSuccess] = useState(false);
+  const [transferStatus, setTransferStatus] = useState<any>(null);
   const router = useRouter();
   const supabase = createClient();
+
+  // Fetch transfer status if booking is completed
+  useEffect(() => {
+    if (booking.status === 'completed') {
+      const fetchTransferStatus = async () => {
+        const { data, error } = await supabase
+          .from('detailer_transfers')
+          .select('*')
+          .eq('booking_id', booking.id)
+          .single();
+
+        if (!error && data) {
+          setTransferStatus(data);
+        }
+      };
+      fetchTransferStatus();
+    }
+  }, [booking.id, booking.status, supabase]);
 
   const handleAssigned = () => {
     router.refresh();
   };
 
   const handleStatusUpdate = async (newStatus: string) => {
-    const { error } = await supabase.rpc('update_booking_status', {
-      p_booking_id: booking.id,
-      p_new_status: newStatus,
-    });
+    setStatusUpdateLoading(true);
+    setStatusUpdateError(null);
+    setStatusUpdateSuccess(false);
 
-    if (error) {
-      console.error('Error updating status:', error);
-      alert('Failed to update status');
-    } else {
-      router.refresh();
+    try {
+      // First, verify the detailer assignment before calling RPC
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setStatusUpdateError('Not authenticated. Please sign in again.');
+        setStatusUpdateLoading(false);
+        return;
+      }
+
+      // Get current user's detailer record
+      const { data: detailerRecord, error: detailerError } = await supabase
+        .from('detailers')
+        .select('id, profile_id')
+        .eq('profile_id', user.id)
+        .single();
+
+      if (detailerError || !detailerRecord) {
+        console.error('Error getting detailer record:', detailerError);
+        setStatusUpdateError('Unable to verify detailer assignment. Please contact support.');
+        setStatusUpdateLoading(false);
+        return;
+      }
+
+      // Verify booking is assigned to this detailer
+      if (booking.detailer_id !== detailerRecord.id) {
+        setStatusUpdateError(
+          `This booking is not assigned to you. Booking detailer_id: ${booking.detailer_id}, Your detailer_id: ${detailerRecord.id}`
+        );
+        setStatusUpdateLoading(false);
+        return;
+      }
+
+      // Now call the RPC function
+      const { data, error } = await supabase.rpc('update_booking_status', {
+        p_booking_id: booking.id,
+        p_new_status: newStatus,
+      });
+
+      if (error) {
+        console.error('Error updating status:', error);
+        // Extract user-friendly error message
+        let errorMessage = 'Failed to update status';
+        
+        // Check for specific error messages
+        if (error.message) {
+          errorMessage = error.message;
+          // If it's the detailer assignment error, provide more context
+          if (error.message.includes('Detailer not assigned')) {
+            errorMessage = `Unable to update status: This booking may not be properly assigned to your account. Please contact support if this booking should be assigned to you.`;
+          }
+        } else if (error.details) {
+          errorMessage = error.details;
+        } else if (error.hint) {
+          errorMessage = error.hint;
+        }
+        
+        setStatusUpdateError(errorMessage);
+        setStatusUpdateLoading(false);
+      } else {
+        setStatusUpdateSuccess(true);
+        // Refresh after a short delay to show success message
+        setTimeout(() => {
+          router.refresh();
+        }, 1500);
+      }
+    } catch (err: any) {
+      console.error('Error updating status:', err);
+      setStatusUpdateError(err?.message || 'An unexpected error occurred');
+      setStatusUpdateLoading(false);
+    }
+  };
+
+  const handleCompleteService = () => {
+    if (confirm('Are you sure you want to mark this service as completed? This will initiate the payment transfer.')) {
+      handleStatusUpdate('completed');
     }
   };
 
@@ -117,7 +209,7 @@ export default function BookingDetailClient({
             <h2 className="text-lg font-semibold text-white mb-4">Customer Information</h2>
             <div className="space-y-2 text-[#C6CFD9]">
               <div>
-                <strong>Name:</strong> {booking.user?.full_name || booking.user_id || 'N/A'}
+                <strong>Name:</strong> {booking.user?.full_name || 'N/A'}
               </div>
               <div>
                 <strong>Phone:</strong> {booking.user?.phone || 'N/A'}
@@ -166,6 +258,8 @@ export default function BookingDetailClient({
             totalAmount={booking.total_amount || 0}
             platformFee={platformFee}
             platformFeePercentage={platformFeePercentage}
+            stripeProcessingFee={booking.stripe_processing_fee || 0}
+            stripeConnectFee={booking.stripe_connect_fee || 0}
           />
         </div>
 
@@ -261,23 +355,96 @@ export default function BookingDetailClient({
           </div>
         )}
 
+        {/* Transfer Status Display (for completed bookings) */}
+        {booking.status === 'completed' && transferStatus && (
+          <div className="mt-6 pt-6 border-t border-white/10">
+            <h2 className="text-lg font-semibold text-white mb-4">Payment Transfer</h2>
+            <div className="bg-[#050B12] border border-white/10 rounded-lg p-4">
+              <div className="space-y-2 text-[#C6CFD9]">
+                <div className="flex justify-between">
+                  <span>Transfer Amount:</span>
+                  <span className="text-white font-semibold">
+                    ${(transferStatus.amount_cents / 100).toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Status:</span>
+                  <span className={`font-semibold ${
+                    transferStatus.status === 'succeeded' ? 'text-[#32CE7A]' :
+                    transferStatus.status === 'processing' ? 'text-yellow-400' :
+                    transferStatus.status === 'failed' ? 'text-red-400' :
+                    'text-[#C6CFD9]'
+                  }`}>
+                    {transferStatus.status.charAt(0).toUpperCase() + transferStatus.status.slice(1)}
+                  </span>
+                </div>
+                {transferStatus.stripe_transfer_id && (
+                  <div className="text-sm text-[#C6CFD9] mt-2">
+                    Stripe Transfer ID: {transferStatus.stripe_transfer_id}
+                  </div>
+                )}
+                {transferStatus.error_message && (
+                  <div className="text-sm text-red-400 mt-2">
+                    Error: {transferStatus.error_message}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Transfer Status Display (for completed bookings without transfer) */}
+        {booking.status === 'completed' && !transferStatus && (
+          <div className="mt-6 pt-6 border-t border-white/10">
+            <h2 className="text-lg font-semibold text-white mb-4">Payment Transfer</h2>
+            <div className="bg-[#050B12] border border-white/10 rounded-lg p-4">
+              <p className="text-[#C6CFD9]">
+                Transfer information will be available once the payment is processed.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Update Status Section */}
         {canUpdateStatus && (
           <div className="mt-6 pt-6 border-t border-white/10">
             <h2 className="text-lg font-semibold text-white mb-4">Update Status</h2>
+            
+            {/* Error Message */}
+            {statusUpdateError && (
+              <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <p className="text-red-400 text-sm">{statusUpdateError}</p>
+              </div>
+            )}
+
+            {/* Success Message */}
+            {statusUpdateSuccess && (
+              <div className="mb-4 p-4 bg-[#32CE7A]/10 border border-[#32CE7A]/20 rounded-lg">
+                <p className="text-[#32CE7A] text-sm">
+                  Status updated successfully! {booking.status === 'completed' && 'Payment transfer has been initiated.'}
+                </p>
+              </div>
+            )}
+
+            {/* Status Update Buttons */}
             {booking.status === 'accepted' && (
               <button
                 onClick={() => handleStatusUpdate('in_progress')}
-                className="bg-[#32CE7A] hover:bg-[#2AB869] text-white font-semibold py-2 px-6 rounded-lg transition-colors"
+                disabled={statusUpdateLoading}
+                className="bg-[#32CE7A] hover:bg-[#2AB869] disabled:bg-[#32CE7A]/50 disabled:cursor-not-allowed text-white font-semibold py-2 px-6 rounded-lg transition-colors flex items-center gap-2"
               >
+                {statusUpdateLoading && <LoadingSpinner size="sm" />}
                 Start Service
               </button>
             )}
             {booking.status === 'in_progress' && (
               <button
-                onClick={() => handleStatusUpdate('completed')}
-                className="bg-[#32CE7A] hover:bg-[#2AB869] text-white font-semibold py-2 px-6 rounded-lg transition-colors"
+                onClick={handleCompleteService}
+                disabled={statusUpdateLoading}
+                className="bg-[#32CE7A] hover:bg-[#2AB869] disabled:bg-[#32CE7A]/50 disabled:cursor-not-allowed text-white font-semibold py-2 px-6 rounded-lg transition-colors flex items-center gap-2"
               >
-                Mark as Completed
+                {statusUpdateLoading && <LoadingSpinner size="sm" />}
+                Complete Service
               </button>
             )}
           </div>

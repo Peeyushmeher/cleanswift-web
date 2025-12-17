@@ -61,6 +61,7 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
 
   // Fetch full booking data with related tables
   // We've already verified access above, so RLS will allow this query
+  // Use explicit foreign key references to ensure data loads correctly
   const { data: booking, error } = await supabase
     .from('bookings')
     .select(
@@ -80,7 +81,7 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
         year,
         license_plate
       ),
-      user:user_id (
+      user:profiles!bookings_user_id_fkey (
         id,
         full_name,
         phone,
@@ -98,6 +99,12 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
     )
     .eq('id', id)
     .single();
+  
+  // Ensure Stripe fees are numbers (they might be strings from DB)
+  if (booking) {
+    booking.stripe_processing_fee = parseFloat(booking.stripe_processing_fee || '0');
+    booking.stripe_connect_fee = parseFloat(booking.stripe_connect_fee || '0');
+  }
 
   if (error || !booking) {
     console.error('Booking query error:', error);
@@ -130,10 +137,11 @@ export default async function BookingDetailPage({ params }: { params: Promise<{ 
   const canReassign = mode === 'organization' && organization && orgRole && canAssignJobs(orgRole);
 
   // Calculate platform fee for payment breakdown using detailer's pricing model
-  const totalAmount = parseFloat(booking.total_amount || '0');
+  // Platform fee is calculated on service_price (not total_amount which includes Stripe fees)
+  const servicePrice = parseFloat(booking.service_price || '0');
   const detailerId = booking.detailer_id || detailerData?.id;
-  const platformFee = await calculatePlatformFee(totalAmount, undefined, detailerId);
-  const platformFeePercentage = totalAmount > 0 ? (platformFee / totalAmount) * 100 : 0;
+  const platformFee = await calculatePlatformFee(servicePrice, undefined, detailerId);
+  const platformFeePercentage = servicePrice > 0 ? (platformFee / servicePrice) * 100 : 0;
 
   return (
     <div className="min-h-screen bg-[#050B12] text-white">

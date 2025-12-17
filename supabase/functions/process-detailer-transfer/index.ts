@@ -88,7 +88,7 @@ serve(async (req) => {
     // Validate booking exists and is completed
     const { data: booking, error: bookingError } = await supabase
       .from('bookings')
-      .select('id, status, detailer_id, total_amount, organization_id')
+      .select('id, status, detailer_id, total_amount, service_price, organization_id')
       .eq('id', booking_id)
       .single();
 
@@ -128,24 +128,36 @@ serve(async (req) => {
     // Check if transfer already exists
     const { data: existingTransfer } = await supabase
       .from('detailer_transfers')
-      .select('id, status, stripe_transfer_id')
+      .select('id, status, stripe_transfer_id, amount_cents, platform_fee_cents')
       .eq('booking_id', booking_id)
       .single();
 
     if (existingTransfer) {
-      console.log('Transfer already exists for this booking:', existingTransfer.id);
-      return new Response(
-        JSON.stringify({
-          success: true,
-          transfer_id: existingTransfer.id,
-          stripe_transfer_id: existingTransfer.stripe_transfer_id,
-          message: 'Transfer already processed',
-        }),
-        {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
+      // If transfer is already succeeded or processing, return early
+      if (existingTransfer.status === 'succeeded' || existingTransfer.status === 'processing') {
+        console.log('Transfer already processed for this booking:', existingTransfer.id);
+        return new Response(
+          JSON.stringify({
+            success: true,
+            transfer_id: existingTransfer.id,
+            stripe_transfer_id: existingTransfer.stripe_transfer_id,
+            message: 'Transfer already processed',
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      
+      // If transfer is pending or retry_pending, continue to process it
+      if (existingTransfer.status === 'pending' || existingTransfer.status === 'retry_pending') {
+        console.log('Processing existing pending transfer:', existingTransfer.id);
+        // Continue with processing below - we'll use the existing transfer record
+      } else {
+        // Transfer is in failed state, we can retry
+        console.log('Retrying failed transfer:', existingTransfer.id);
+      }
     }
 
     // Get detailer info
@@ -239,8 +251,11 @@ serve(async (req) => {
       }
     }
 
-    const platformFee = (booking.total_amount * platformFeePercentage) / 100;
-    const payoutAmount = booking.total_amount - platformFee;
+    // Platform fee is calculated on service_price (not total_amount which includes Stripe fees)
+    // The customer pays Stripe fees, so detailer payout is based on service_price only
+    const servicePrice = parseFloat(booking.service_price || booking.total_amount || '0');
+    const platformFee = (servicePrice * platformFeePercentage) / 100;
+    const payoutAmount = servicePrice - platformFee;
     const amountCents = Math.round(payoutAmount * 100);
     const platformFeeCents = Math.round(platformFee * 100);
 
@@ -252,31 +267,61 @@ serve(async (req) => {
       amount_cents: amountCents,
     });
 
-    // Create transfer record with pending status
-    const { data: transferRecord, error: transferInsertError } = await supabase
-      .from('detailer_transfers')
-      .insert({
-        booking_id: booking_id,
-        detailer_id: detailer.id,
-        amount_cents: amountCents,
-        platform_fee_cents: platformFeeCents,
-        status: 'pending',
-      })
-      .select()
-      .single();
+    // Use existing transfer record if it exists, otherwise create new one
+    let transferRecord;
+    if (existingTransfer) {
+      // Update existing transfer record with calculated amounts (in case they changed)
+      const { data: updatedTransfer, error: updateError } = await supabase
+        .from('detailer_transfers')
+        .update({
+          amount_cents: amountCents,
+          platform_fee_cents: platformFeeCents,
+          status: 'pending', // Reset to pending if it was retry_pending
+          error_message: null, // Clear any previous errors
+        })
+        .eq('id', existingTransfer.id)
+        .select()
+        .single();
 
-    if (transferInsertError || !transferRecord) {
-      console.error('Failed to create transfer record:', transferInsertError);
-      return new Response(
-        JSON.stringify({ error: 'Failed to create transfer record' }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
+      if (updateError || !updatedTransfer) {
+        console.error('Failed to update transfer record:', updateError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to update transfer record' }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      transferRecord = updatedTransfer;
+      console.log('Updated existing transfer record:', transferRecord.id);
+    } else {
+      // Create new transfer record with pending status
+      const { data: newTransfer, error: transferInsertError } = await supabase
+        .from('detailer_transfers')
+        .insert({
+          booking_id: booking_id,
+          detailer_id: detailer.id,
+          amount_cents: amountCents,
+          platform_fee_cents: platformFeeCents,
+          status: 'pending',
+        })
+        .select()
+        .single();
+
+      if (transferInsertError || !newTransfer) {
+        console.error('Failed to create transfer record:', transferInsertError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to create transfer record' }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      transferRecord = newTransfer;
+      console.log('Created transfer record:', transferRecord.id);
     }
-
-    console.log('Created transfer record:', transferRecord.id);
 
     // Initialize Stripe
     const stripeKey = Deno.env.get('STRIPE_SECRET_KEY');

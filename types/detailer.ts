@@ -33,6 +33,8 @@ export interface Booking {
   service_price: number;
   addons_total: number;
   tax_amount: number;
+  stripe_processing_fee?: number;
+  stripe_connect_fee?: number;
   detailer_id?: string | null;
   organization_id?: string | null;
   team_id?: string | null;
