@@ -7,6 +7,7 @@ import OrgEarningsSummary from '@/components/detailer/OrgEarningsSummary';
 import TeamEarningsBreakdown from '@/components/detailer/TeamEarningsBreakdown';
 import PayoutBatches from '@/components/detailer/PayoutBatches';
 import TransferHistory from '@/components/detailer/TransferHistory';
+import WeeklyPayoutSummary from '@/components/detailer/WeeklyPayoutSummary';
 
 interface EarningsPageClientProps {
   earningsData: any[];
@@ -80,8 +81,8 @@ export default function EarningsPageClient({
           <div className="text-[#C6CFD9] text-sm mb-2">Next Payout</div>
           <div className="text-lg font-semibold text-[#C6CFD9]">
             {transferStats && transferStats.pendingTransfers > 0
-              ? formatCurrency(transferStats.pendingTransfers)
-              : 'On-demand'}
+              ? 'Weekly (Wed)'
+              : 'Weekly (Wed)'}
           </div>
         </div>
         </div>
@@ -95,6 +96,18 @@ export default function EarningsPageClient({
       {/* Payout Batches (Org Mode) */}
       {isOrgMode && payoutBatches.length > 0 && (
         <PayoutBatches batches={payoutBatches} />
+      )}
+
+      {/* Weekly Payout Summary (Solo Mode) */}
+      {!isOrgMode && (
+        <WeeklyPayoutSummary
+          batches={payoutBatches || []}
+          pendingAmount={transferStats?.pendingTransfers || 0}
+          pendingCount={transfers?.filter((t: any) => 
+            (t.status === 'pending' && !t.weekly_payout_batch_id) || 
+            (t.status === 'processing' && t.weekly_payout_batch_id)
+          ).length || 0}
+        />
       )}
 
       {/* Transfer History (Solo Mode) */}

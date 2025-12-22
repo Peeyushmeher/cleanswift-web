@@ -144,7 +144,7 @@ export default async function EarningsPage() {
     // Use detailer-specific platform fee calculation
     pendingPayouts = await calculateDetailerPayout(totalEarnings, undefined, detailerData.id);
 
-    // Fetch transfer data for solo detailers
+    // Fetch transfer data and weekly payout batches for solo detailers
     if (mode === 'solo') {
       const { data: transferData } = await supabase
         .from('detailer_transfers')
@@ -156,6 +156,12 @@ export default async function EarningsPage() {
             total_amount,
             completed_at,
             service:service_id (name)
+          ),
+          weekly_payout_batch:solo_weekly_payout_batches (
+            id,
+            week_start_date,
+            week_end_date,
+            status
           )
         `)
         .eq('detailer_id', detailerData.id)
@@ -163,26 +169,42 @@ export default async function EarningsPage() {
 
       transfers = transferData || [];
 
+      // Fetch weekly payout batches
+      const { data: weeklyBatches } = await supabase
+        .from('solo_weekly_payout_batches')
+        .select('*')
+        .eq('detailer_id', detailerData.id)
+        .order('week_start_date', { ascending: false })
+        .limit(20);
+
+      payoutBatches = weeklyBatches || [];
+
       // Calculate transfer stats
       const totalTransferred = transfers
         .filter((t: any) => t.status === 'succeeded')
         .reduce((sum: number, t: any) => sum + (t.amount_cents / 100), 0);
 
+      // Calculate pending transfers (not yet in a batch)
       const pendingTransfers = transfers
-        .filter((t: any) => ['pending', 'processing', 'retry_pending'].includes(t.status))
+        .filter((t: any) => t.status === 'pending' && !t.weekly_payout_batch_id)
+        .reduce((sum: number, t: any) => sum + (t.amount_cents / 100), 0);
+
+      // Calculate transfers in processing batches
+      const processingTransfers = transfers
+        .filter((t: any) => t.status === 'processing' && t.weekly_payout_batch_id)
         .reduce((sum: number, t: any) => sum + (t.amount_cents / 100), 0);
 
       const failedTransfers = transfers.filter((t: any) => t.status === 'failed').length;
 
       transferStats = {
         totalTransferred,
-        pendingTransfers,
+        pendingTransfers: pendingTransfers + processingTransfers, // Include both pending and processing
         failedTransfers,
       };
 
       // Update pendingPayouts to show actual pending transfers if available
-      if (pendingTransfers > 0) {
-        pendingPayouts = pendingTransfers;
+      if (pendingTransfers + processingTransfers > 0) {
+        pendingPayouts = pendingTransfers + processingTransfers;
       }
     }
   }

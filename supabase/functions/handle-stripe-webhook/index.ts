@@ -231,8 +231,17 @@ serve(async (req) => {
         }
         break;
 
+      case 'transfer.updated':
+        {
+          const transfer = event.data.object as Stripe.Transfer;
+          // Check transfer status to determine if it succeeded or failed
+          await handleTransferUpdated(supabase, transfer);
+        }
+        break;
+
       case 'transfer.paid':
         {
+          // This event may not be available in all Stripe accounts
           const transfer = event.data.object as Stripe.Transfer;
           await handleTransferPaid(supabase, transfer);
         }
@@ -240,6 +249,7 @@ serve(async (req) => {
 
       case 'transfer.failed':
         {
+          // This event may not be available in all Stripe accounts
           const transfer = event.data.object as Stripe.Transfer;
           await handleTransferFailed(supabase, transfer);
         }
@@ -768,8 +778,40 @@ async function handleTransferCreated(
 }
 
 /**
+ * Handle transfer.updated event
+ * - Checks transfer status and routes to appropriate handler
+ * - This is the primary event for tracking transfer status changes
+ */
+async function handleTransferUpdated(
+  supabase: ReturnType<typeof createClient>,
+  transfer: Stripe.Transfer
+) {
+  console.log('🟡 Processing transfer.updated');
+  console.log('Transfer ID:', transfer.id);
+  console.log('Transfer status:', transfer.status);
+  console.log('Amount:', transfer.amount, 'cents');
+
+  // Check transfer status and route to appropriate handler
+  // Stripe transfer status can be: 'pending', 'paid', 'failed', 'canceled'
+  if (transfer.status === 'paid') {
+    console.log('Transfer is paid, routing to handleTransferPaid');
+    await handleTransferPaid(supabase, transfer);
+  } else if (transfer.status === 'failed') {
+    console.log('Transfer failed, routing to handleTransferFailed');
+    await handleTransferFailed(supabase, transfer);
+  } else if (transfer.status === 'pending') {
+    console.log('Transfer is still pending, updating to processing');
+    // Update to processing status
+    await handleTransferCreated(supabase, transfer);
+  } else {
+    console.log(`ℹ️  Transfer status is "${transfer.status}", no action needed`);
+  }
+}
+
+/**
  * Handle transfer.paid event
- * - Update transfer status to 'succeeded'
+ * - Update transfer status to 'succeeded' (for individual transfers)
+ * - Update batch status and all related transfers (for weekly batch transfers)
  */
 async function handleTransferPaid(
   supabase: ReturnType<typeof createClient>,
@@ -779,6 +821,45 @@ async function handleTransferPaid(
   console.log('Transfer ID:', transfer.id);
   console.log('Amount:', transfer.amount, 'cents');
 
+  // Check if this is a weekly batch transfer
+  const weeklyBatchId = transfer.metadata?.weekly_batch_id;
+  if (weeklyBatchId) {
+    console.log('📦 Processing weekly batch transfer for batch:', weeklyBatchId);
+    
+    // Update batch status to 'succeeded'
+    const { error: updateBatchError } = await supabase
+      .from('solo_weekly_payout_batches')
+      .update({
+        status: 'succeeded',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', weeklyBatchId);
+
+    if (updateBatchError) {
+      console.error('❌ Failed to update batch status:', updateBatchError);
+    } else {
+      console.log('✅ Updated batch status to "succeeded"');
+    }
+
+    // Update all related transfers to 'succeeded'
+    const { error: updateTransfersError } = await supabase
+      .from('detailer_transfers')
+      .update({
+        status: 'succeeded',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('weekly_payout_batch_id', weeklyBatchId)
+      .eq('status', 'processing'); // Only update transfers that are processing
+
+    if (updateTransfersError) {
+      console.error('❌ Failed to update related transfers:', updateTransfersError);
+    } else {
+      console.log('✅ Updated all related transfers to "succeeded"');
+    }
+    return;
+  }
+
+  // Handle individual transfer (legacy or edge case)
   const transferId = transfer.metadata?.transfer_id;
   if (!transferId) {
     // Try to find by stripe_transfer_id if metadata doesn't have transfer_id
@@ -829,7 +910,8 @@ async function handleTransferPaid(
 
 /**
  * Handle transfer.failed event
- * - Update transfer status to 'failed' or 'retry_pending' based on retry count
+ * - Update transfer status to 'failed' or 'retry_pending' based on retry count (for individual transfers)
+ * - Update batch status and all related transfers (for weekly batch transfers)
  */
 async function handleTransferFailed(
   supabase: ReturnType<typeof createClient>,
@@ -840,6 +922,49 @@ async function handleTransferFailed(
   console.log('Failure code:', transfer.failure_code);
   console.log('Failure message:', transfer.failure_message);
 
+  // Check if this is a weekly batch transfer
+  const weeklyBatchId = transfer.metadata?.weekly_batch_id;
+  if (weeklyBatchId) {
+    console.log('📦 Processing failed weekly batch transfer for batch:', weeklyBatchId);
+    
+    const errorMessage = transfer.failure_message || transfer.failure_code || 'Transfer failed';
+    
+    // Update batch status to 'failed'
+    const { error: updateBatchError } = await supabase
+      .from('solo_weekly_payout_batches')
+      .update({
+        status: 'failed',
+        error_message: errorMessage,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', weeklyBatchId);
+
+    if (updateBatchError) {
+      console.error('❌ Failed to update batch status:', updateBatchError);
+    } else {
+      console.log('✅ Updated batch status to "failed"');
+    }
+
+    // Update all related transfers to 'retry_pending' so they can be included in next week's batch
+    const { error: updateTransfersError } = await supabase
+      .from('detailer_transfers')
+      .update({
+        status: 'retry_pending',
+        error_message: `Batch transfer failed: ${errorMessage}`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('weekly_payout_batch_id', weeklyBatchId)
+      .eq('status', 'processing'); // Only update transfers that are processing
+
+    if (updateTransfersError) {
+      console.error('❌ Failed to update related transfers:', updateTransfersError);
+    } else {
+      console.log('✅ Updated all related transfers to "retry_pending" for next batch');
+    }
+    return;
+  }
+
+  // Handle individual transfer (legacy or edge case)
   const transferId = transfer.metadata?.transfer_id;
   if (!transferId) {
     // Try to find by stripe_transfer_id
