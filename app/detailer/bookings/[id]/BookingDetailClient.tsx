@@ -50,7 +50,16 @@ export default function BookingDetailClient({
       const fetchTransferStatus = async () => {
         const { data, error } = await supabase
           .from('detailer_transfers')
-          .select('*')
+          .select(`
+            *,
+            weekly_payout_batch:solo_weekly_payout_batches (
+              id,
+              week_start_date,
+              week_end_date,
+              status,
+              processed_at
+            )
+          `)
           .eq('booking_id', booking.id)
           .single();
 
@@ -375,9 +384,35 @@ export default function BookingDetailClient({
                     transferStatus.status === 'failed' ? 'text-red-400' :
                     'text-[#C6CFD9]'
                   }`}>
-                    {transferStatus.status.charAt(0).toUpperCase() + transferStatus.status.slice(1)}
+                    {transferStatus.status === 'pending' && !transferStatus.weekly_payout_batch_id
+                      ? 'Pending Weekly Batch'
+                      : transferStatus.status === 'processing' && transferStatus.weekly_payout_batch_id
+                      ? 'Processing in Weekly Batch'
+                      : transferStatus.status.charAt(0).toUpperCase() + transferStatus.status.slice(1)}
                   </span>
                 </div>
+                {transferStatus.weekly_payout_batch_id && transferStatus.weekly_payout_batch && (
+                  <div className="text-sm text-[#C6CFD9] mt-2 space-y-1">
+                    <div>
+                      Weekly Batch: {new Date(transferStatus.weekly_payout_batch.week_start_date).toLocaleDateString()} - {new Date(transferStatus.weekly_payout_batch.week_end_date).toLocaleDateString()}
+                    </div>
+                    <div>
+                      Batch Status: <span className={`${
+                        transferStatus.weekly_payout_batch.status === 'succeeded' ? 'text-[#32CE7A]' :
+                        transferStatus.weekly_payout_batch.status === 'processing' ? 'text-yellow-400' :
+                        transferStatus.weekly_payout_batch.status === 'failed' ? 'text-red-400' :
+                        'text-[#C6CFD9]'
+                      }`}>
+                        {transferStatus.weekly_payout_batch.status.charAt(0).toUpperCase() + transferStatus.weekly_payout_batch.status.slice(1)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {!transferStatus.weekly_payout_batch_id && transferStatus.status === 'pending' && (
+                  <div className="text-sm text-[#C6CFD9] mt-2">
+                    This transfer will be included in the next weekly payout (Wednesdays).
+                  </div>
+                )}
                 {transferStatus.stripe_transfer_id && (
                   <div className="text-sm text-[#C6CFD9] mt-2">
                     Stripe Transfer ID: {transferStatus.stripe_transfer_id}
@@ -399,7 +434,8 @@ export default function BookingDetailClient({
             <h2 className="text-lg font-semibold text-white mb-4">Payment Transfer</h2>
             <div className="bg-[#050B12] border border-white/10 rounded-lg p-4">
               <p className="text-[#C6CFD9]">
-                Transfer information will be available once the payment is processed.
+                Transfer information will be available once the payment is processed. 
+                Transfers are processed weekly on Wednesdays.
               </p>
             </div>
           </div>

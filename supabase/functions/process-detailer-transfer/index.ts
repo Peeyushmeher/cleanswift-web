@@ -1,17 +1,23 @@
+// @ts-nocheck
+// TypeScript errors in this file are expected - this runs in Deno, not Node.js
+// The code works correctly when deployed to Supabase Edge Functions
+
 // Supabase Edge Function: process-detailer-transfer
-// Purpose: Process Stripe Connect transfer to solo detailer when booking is completed
+// Purpose: Create or update detailer_transfers record for weekly batch processing
+//
+// NOTE: This function no longer creates Stripe transfers immediately.
+// Transfers accumulate as 'pending' and are processed weekly by process-weekly-payouts.
 //
 // Security features:
 // - Uses service role key (bypasses RLS)
 // - Validates booking is completed and has detailer assigned
 // - Only processes solo detailers (not organization members)
 // - Verifies Stripe Connect account exists
-// - Handles errors gracefully with retry mechanism
+// - Handles errors gracefully
 // - Prevents duplicate transfers
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import Stripe from 'https://esm.sh/stripe@14.21.0?target=deno';
 
 interface ProcessTransferRequest {
   booking_id: string;
@@ -20,8 +26,8 @@ interface ProcessTransferRequest {
 interface ProcessTransferResponse {
   success: boolean;
   transfer_id?: string;
-  stripe_transfer_id?: string;
   amount_cents?: number;
+  message?: string;
   error?: string;
 }
 
@@ -323,102 +329,21 @@ serve(async (req) => {
       console.log('Created transfer record:', transferRecord.id);
     }
 
-    // Initialize Stripe
-    const stripeKey = Deno.env.get('STRIPE_SECRET_KEY');
-    if (!stripeKey) {
-      console.error('STRIPE_SECRET_KEY not configured');
-      // Update transfer record to failed
-      await supabase
-        .from('detailer_transfers')
-        .update({
-          status: 'failed',
-          error_message: 'Stripe not configured',
-        })
-        .eq('id', transferRecord.id);
+    // Transfer record created/updated successfully
+    // It will be processed in the next weekly batch (process-weekly-payouts)
+    console.log('✅ Transfer record created/updated. Will be processed in weekly batch.');
 
-      return new Response(
-        JSON.stringify({ error: 'Payment service not configured' }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
-    }
+    const response: ProcessTransferResponse = {
+      success: true,
+      transfer_id: transferRecord.id,
+      amount_cents: amountCents,
+      message: 'Transfer record created. Will be processed in weekly batch.',
+    };
 
-    const stripe = new Stripe(stripeKey, {
-      apiVersion: '2023-10-16',
-      httpClient: Stripe.createFetchHttpClient(),
+    return new Response(JSON.stringify(response), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
     });
-
-    // Create Stripe transfer
-    try {
-      const stripeTransfer = await stripe.transfers.create({
-        amount: amountCents,
-        currency: 'cad',
-        destination: detailer.stripe_connect_account_id,
-        metadata: {
-          booking_id: booking.id,
-          detailer_id: detailer.id,
-          transfer_id: transferRecord.id,
-        },
-      });
-
-      console.log('✅ Stripe transfer created:', stripeTransfer.id);
-
-      // Update transfer record with Stripe transfer ID and status
-      const { error: updateError } = await supabase
-        .from('detailer_transfers')
-        .update({
-          stripe_transfer_id: stripeTransfer.id,
-          status: 'processing', // Will be updated to 'succeeded' via webhook
-        })
-        .eq('id', transferRecord.id);
-
-      if (updateError) {
-        console.error('Failed to update transfer record:', updateError);
-        // Don't fail - transfer was created successfully
-      }
-
-      const response: ProcessTransferResponse = {
-        success: true,
-        transfer_id: transferRecord.id,
-        stripe_transfer_id: stripeTransfer.id,
-        amount_cents: amountCents,
-      };
-
-      return new Response(JSON.stringify(response), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    } catch (stripeError) {
-      console.error('Stripe transfer error:', stripeError);
-      
-      const errorMessage = stripeError instanceof Stripe.errors.StripeError
-        ? stripeError.message
-        : 'Unknown Stripe error';
-
-      // Update transfer record to retry_pending
-      await supabase
-        .from('detailer_transfers')
-        .update({
-          status: 'retry_pending',
-          error_message: errorMessage,
-          retry_count: 1,
-        })
-        .eq('id', transferRecord.id);
-
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: `Stripe error: ${errorMessage}`,
-          transfer_id: transferRecord.id,
-        }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
-    }
   } catch (error) {
     console.error('❌ Unhandled error in process-detailer-transfer:', error);
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
