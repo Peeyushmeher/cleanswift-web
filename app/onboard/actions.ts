@@ -24,6 +24,7 @@ export interface AvailabilitySlot {
 
 export interface DayOff {
   date: string; // YYYY-MM-DD format
+  end_date?: string; // YYYY-MM-DD format (optional, for date ranges)
   reason?: string;
 }
 
@@ -512,24 +513,48 @@ export async function createDetailerProfile(
         console.log('Number of days off:', data.daysOff.length);
         console.log('Days off data:', data.daysOff.map(dayOff => ({
           date: dayOff.date,
+          end_date: dayOff.end_date || 'none',
           reason: dayOff.reason || 'none',
         })));
         
-        // Prepare all days off data
+        // Prepare all days off data with date range support
         const daysOffData = data.daysOff.map(dayOff => ({
           detailer_id: detailer.id,
           date: dayOff.date,
+          end_date: dayOff.end_date || null, // Support date ranges
           reason: dayOff.reason || null,
           is_active: true, // Days off are active by default
         }));
         
-        console.log('Upserting days off data:', daysOffData);
-        // Upsert all days off (handles unique constraint on detailer_id, date)
+        // Since we removed the unique constraint, we need to handle duplicates differently
+        // Strategy: For onboarding, we'll deactivate any existing days off for this detailer
+        // (unlikely during onboarding, but handles edge cases) and then insert the new ones.
+        // This ensures clean data without duplicates.
+        console.log('Checking for existing days off to deactivate...');
+        
+        // During onboarding, there typically won't be existing days off, but we'll handle it
+        // by deactivating any existing ones to ensure clean insertion
+        const { error: deactivateError } = await serviceClient
+          .from('detailer_days_off')
+          .update({ 
+            is_active: false, 
+            updated_at: new Date().toISOString() 
+          })
+          .eq('detailer_id', detailer.id)
+          .eq('is_active', true);
+        
+        if (deactivateError) {
+          console.warn('Warning: Could not deactivate existing days off:', deactivateError);
+          // Continue anyway - we'll still try to insert
+        } else {
+          console.log('Deactivated any existing days off (if any)');
+        }
+        
+        console.log('Inserting days off data:', daysOffData);
+        // Insert all days off (we deactivated existing ones above to avoid conflicts)
         const { data: createdDaysOff, error: dayOffError } = await serviceClient
           .from('detailer_days_off')
-          .upsert(daysOffData, {
-            onConflict: 'detailer_id,date',
-          })
+          .insert(daysOffData)
           .select();
 
         if (dayOffError) {

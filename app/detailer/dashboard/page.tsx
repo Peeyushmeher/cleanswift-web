@@ -6,7 +6,7 @@ import StatsGrid from '@/components/detailer/StatsGrid';
 import TodaysJobsList from '@/components/detailer/TodaysJobsList';
 import EarningsChart from '@/components/detailer/EarningsChart';
 import AvailabilityCalendar from '@/components/detailer/AvailabilityCalendar';
-import { filterBookingsByDateRange, calculateEarnings, formatCurrency } from '@/lib/detailer/dashboard-utils';
+import { filterBookingsByDateRange, calculateEarnings, formatCurrency, formatDate } from '@/lib/detailer/dashboard-utils';
 import { getDetailerOrganization, getOrganizationRole } from '@/lib/detailer/mode-detection';
 
 export default async function DetailerDashboardPage() {
@@ -223,7 +223,14 @@ export default async function DetailerDashboardPage() {
       if (!booking.scheduled_date || !booking.scheduled_time_start) return false;
 
       // Get day of week (0=Sunday, 1=Monday, ..., 6=Saturday)
-      const bookingDate = new Date(booking.scheduled_date);
+      // Parse as local date to avoid timezone issues
+      const dateOnlyPattern = /^\d{4}-\d{2}-\d{2}$/;
+      const bookingDate = dateOnlyPattern.test(booking.scheduled_date)
+        ? (() => {
+            const [year, month, day] = booking.scheduled_date.split('-').map(Number);
+            return new Date(year, month - 1, day);
+          })()
+        : new Date(booking.scheduled_date);
       const dayOfWeek = bookingDate.getDay();
 
       // Find matching availability slot
@@ -445,9 +452,9 @@ export default async function DetailerDashboardPage() {
                       </div>
                       <div className="text-sm text-[#C6CFD9] mt-1">
                         {booking.scheduled_date && booking.scheduled_time_start
-                          ? `${new Date(booking.scheduled_date).toLocaleDateString()} at ${booking.scheduled_time_start.substring(0, 5)}`
+                          ? `${formatDate(booking.scheduled_date)} at ${booking.scheduled_time_start.substring(0, 5)}`
                           : booking.scheduled_start
-                          ? new Date(booking.scheduled_start).toLocaleString()
+                          ? formatDate(booking.scheduled_start, 'short')
                           : 'Date TBD'}
                       </div>
                     </div>

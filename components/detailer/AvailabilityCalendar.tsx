@@ -13,6 +13,7 @@ interface AvailabilitySlot {
 
 interface DayOff {
   date: string; // YYYY-MM-DD
+  end_date?: string | null; // YYYY-MM-DD (optional, for date ranges)
   reason?: string | null;
 }
 
@@ -84,10 +85,14 @@ export default function AvailabilityCalendar({
     return availability.find((slot) => slot.day_of_week === dayOfWeek && slot.is_active !== false);
   };
 
-  // Check if a date is a day off
+  // Check if a date is a day off (handles both single dates and date ranges)
   const isDayOff = (date: Date): boolean => {
     const dateStr = date.toISOString().split('T')[0];
-    return daysOff.some((dayOff) => dayOff.date === dateStr);
+    return daysOff.some((dayOff) => {
+      const startDate = dayOff.date;
+      const endDate = dayOff.end_date || dayOff.date; // If no end_date, it's a single date
+      return dateStr >= startDate && dateStr <= endDate;
+    });
   };
 
   // Get bookings for a specific date
@@ -127,11 +132,18 @@ export default function AvailabilityCalendar({
                 <div className={`text-sm font-semibold ${isOff ? 'text-red-400 line-through' : 'text-white'}`}>
                   {date.getDate()}
                 </div>
-                {isOff && (
-                  <div className="text-xs text-red-400 mt-1">
-                    {daysOff.find((d) => d.date === dateStr)?.reason || 'Day Off'}
-                  </div>
-                )}
+                {isOff && (() => {
+                  const dayOff = daysOff.find((d) => {
+                    const startDate = d.date;
+                    const endDate = d.end_date || d.date;
+                    return dateStr >= startDate && dateStr <= endDate;
+                  });
+                  return (
+                    <div className="text-xs text-red-400 mt-1">
+                      {dayOff?.reason || 'Day Off'}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Time Blocks */}

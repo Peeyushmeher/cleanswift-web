@@ -204,101 +204,164 @@ serve(async (req) => {
 
         console.log(`Processing batch for detailer ${detailerId}: ${transfers.length} transfers, ${totalAmount} cents`);
 
-        // Create weekly batch record
-        const { data: batch, error: batchError } = await supabase
+        // Check if batch already exists for this week
+        const { data: existingBatch, error: findBatchError } = await supabase
           .from('solo_weekly_payout_batches')
-          .insert({
-            detailer_id: detailerId,
-            week_start_date: weekStartStr,
-            week_end_date: weekEndStr,
-            total_amount_cents: totalAmount,
-            total_transfers: transfers.length,
-            status: 'pending',
-          })
-          .select()
-          .single();
+          .select('id, status, total_amount_cents, total_transfers, stripe_transfer_id')
+          .eq('detailer_id', detailerId)
+          .eq('week_start_date', weekStartStr)
+          .maybeSingle();
 
-        if (batchError || !batch) {
-          const errorMsg = `Failed to create batch for detailer ${detailerId}: ${batchError?.message || 'Unknown error'}`;
-          console.error(errorMsg);
-          errors.push(errorMsg);
-          continue;
-        }
-
-        console.log(`Created batch ${batch.id} for detailer ${detailerId}`);
-
-        // Create Stripe transfer
-        try {
-          const stripeTransfer = await stripe.transfers.create({
-            amount: totalAmount,
-            currency: 'cad',
-            destination: detailer.stripe_connect_account_id,
-            metadata: {
-              weekly_batch_id: batch.id,
-              detailer_id: detailerId,
-              week_start: weekStartStr,
-              week_end: weekEndStr,
-              transfer_count: String(transfers.length),
-            },
-          });
-
-          console.log(`✅ Created Stripe transfer ${stripeTransfer.id} for batch ${batch.id}`);
-
-          // Update batch with Stripe transfer ID and status
-          const { error: updateBatchError } = await supabase
+        let batch;
+        if (existingBatch) {
+          // Batch already exists
+          if (existingBatch.status === 'succeeded') {
+            console.log(`Batch ${existingBatch.id} already succeeded for this week. Skipping transfers - they will be included in next week's batch.`);
+            continue; // Skip - batch is already completed
+          }
+          
+          // Batch exists but is pending or processing - update it with new transfers
+          console.log(`Batch ${existingBatch.id} already exists for this week (status: ${existingBatch.status}). Adding transfers to existing batch.`);
+          
+          const newTotalAmount = existingBatch.total_amount_cents + totalAmount;
+          const newTotalTransfers = existingBatch.total_transfers + transfers.length;
+          
+          const { data: updatedBatch, error: updateBatchError } = await supabase
             .from('solo_weekly_payout_batches')
             .update({
-              stripe_transfer_id: stripeTransfer.id,
-              status: 'processing',
-              processed_at: new Date().toISOString(),
+              total_amount_cents: newTotalAmount,
+              total_transfers: newTotalTransfers,
             })
-            .eq('id', batch.id);
+            .eq('id', existingBatch.id)
+            .select()
+            .single();
 
-          if (updateBatchError) {
-            console.error(`Failed to update batch ${batch.id}:`, updateBatchError);
-            // Continue - the transfer was created successfully
-          }
-
-          // Update all related transfers to link to batch
-          const transferIds = transfers.map(t => t.id);
-          const { error: updateTransfersError } = await supabase
-            .from('detailer_transfers')
-            .update({
-              weekly_payout_batch_id: batch.id,
-              stripe_transfer_id: stripeTransfer.id,
-              status: 'processing', // Will be updated to 'succeeded' via webhook
-            })
-            .in('id', transferIds);
-
-          if (updateTransfersError) {
-            const errorMsg = `Failed to update transfers for batch ${batch.id}: ${updateTransfersError.message}`;
+          if (updateBatchError || !updatedBatch) {
+            const errorMsg = `Failed to update existing batch for detailer ${detailerId}: ${updateBatchError?.message || 'Unknown error'}`;
             console.error(errorMsg);
             errors.push(errorMsg);
-            // Continue - batch and Stripe transfer were created successfully
-          } else {
-            console.log(`✅ Updated ${transferIds.length} transfers to link to batch ${batch.id}`);
-            batchesCreated++;
-            transfersProcessed += transfers.length;
+            continue;
           }
 
-        } catch (stripeError) {
-          console.error(`Stripe transfer error for detailer ${detailerId}:`, stripeError);
+          // Preserve stripe_transfer_id from existingBatch if updatedBatch doesn't have it
+          batch = {
+            ...updatedBatch,
+            stripe_transfer_id: updatedBatch.stripe_transfer_id || existingBatch.stripe_transfer_id,
+          };
+          console.log(`Updated existing batch ${batch.id} - new total: ${newTotalAmount} cents, ${newTotalTransfers} transfers`);
           
-          const errorMessage = stripeError instanceof Stripe.errors.StripeError
-            ? stripeError.message
-            : 'Unknown Stripe error';
-
-          // Update batch to failed status
-          await supabase
+          // If batch already has a Stripe transfer, we should NOT create a new one
+          // Just link the new transfers to the existing batch
+          if (batch.stripe_transfer_id) {
+            console.log(`✅ Batch already has Stripe transfer ${batch.stripe_transfer_id}. New transfers will be linked to existing batch.`);
+          }
+        } else {
+          // Create new weekly batch record
+          const { data: newBatch, error: batchError } = await supabase
             .from('solo_weekly_payout_batches')
-            .update({
-              status: 'failed',
-              error_message: errorMessage,
+            .insert({
+              detailer_id: detailerId,
+              week_start_date: weekStartStr,
+              week_end_date: weekEndStr,
+              total_amount_cents: totalAmount,
+              total_transfers: transfers.length,
+              status: 'pending',
             })
-            .eq('id', batch.id);
+            .select()
+            .single();
 
-          const errorMsg = `Stripe error for detailer ${detailerId}: ${errorMessage}`;
+          if (batchError || !newBatch) {
+            const errorMsg = `Failed to create batch for detailer ${detailerId}: ${batchError?.message || 'Unknown error'}`;
+            console.error(errorMsg);
+            errors.push(errorMsg);
+            continue;
+          }
+
+          batch = newBatch;
+          console.log(`Created batch ${batch.id} for detailer ${detailerId}`);
+        }
+
+        // Create Stripe transfer (only if batch doesn't already have one)
+        let stripeTransfer;
+        if (!batch.stripe_transfer_id) {
+          try {
+            stripeTransfer = await stripe.transfers.create({
+              amount: batch.total_amount_cents, // Use batch total (includes existing + new transfers)
+              currency: 'cad',
+              destination: detailer.stripe_connect_account_id,
+              metadata: {
+                weekly_batch_id: batch.id,
+                detailer_id: detailerId,
+                week_start: weekStartStr,
+                week_end: weekEndStr,
+                transfer_count: String(batch.total_transfers),
+              },
+            });
+
+            console.log(`✅ Created Stripe transfer ${stripeTransfer.id} for batch ${batch.id}`);
+
+            // Update batch with Stripe transfer ID and status
+            const { error: updateBatchError } = await supabase
+              .from('solo_weekly_payout_batches')
+              .update({
+                stripe_transfer_id: stripeTransfer.id,
+                status: 'processing',
+                processed_at: new Date().toISOString(),
+              })
+              .eq('id', batch.id);
+
+            if (updateBatchError) {
+              console.error(`Failed to update batch ${batch.id}:`, updateBatchError);
+              // Continue - the transfer was created successfully
+            }
+          } catch (stripeError) {
+            console.error(`Stripe transfer error for detailer ${detailerId}:`, stripeError);
+            
+            const errorMessage = stripeError instanceof Stripe.errors.StripeError
+              ? stripeError.message
+              : 'Unknown Stripe error';
+
+            // Update batch to failed status
+            await supabase
+              .from('solo_weekly_payout_batches')
+              .update({
+                status: 'failed',
+                error_message: errorMessage,
+              })
+              .eq('id', batch.id);
+
+            const errorMsg = `Stripe error for detailer ${detailerId}: ${errorMessage}`;
+            errors.push(errorMsg);
+            continue; // Skip to next detailer
+          }
+        } else {
+          // Batch already has a Stripe transfer - use existing one
+          stripeTransfer = { id: batch.stripe_transfer_id };
+          console.log(`Using existing Stripe transfer ${stripeTransfer.id} for batch ${batch.id}`);
+        }
+
+        // Update all related transfers to link to batch
+        const transferIds = transfers.map(t => t.id);
+        const { error: updateTransfersError } = await supabase
+          .from('detailer_transfers')
+          .update({
+            weekly_payout_batch_id: batch.id,
+            stripe_transfer_id: stripeTransfer.id,
+            status: batch.status === 'succeeded' ? 'succeeded' : 'processing', // Match batch status
+          })
+          .in('id', transferIds);
+
+        if (updateTransfersError) {
+          const errorMsg = `Failed to update transfers for batch ${batch.id}: ${updateTransfersError.message}`;
+          console.error(errorMsg);
           errors.push(errorMsg);
+          // Continue - batch and Stripe transfer were created successfully
+        } else {
+          console.log(`✅ Updated ${transferIds.length} transfers to link to batch ${batch.id}`);
+          if (!existingBatch) {
+            batchesCreated++; // Only count as new batch if we created it
+          }
+          transfersProcessed += transfers.length;
         }
 
       } catch (error) {

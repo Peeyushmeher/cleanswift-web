@@ -17,6 +17,7 @@ interface AvailabilitySlot {
 interface DayOff {
   id: string;
   date: string;
+  end_date?: string | null;
   reason?: string | null;
   is_active: boolean;
 }
@@ -46,7 +47,9 @@ export default function AvailabilityPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [hasDetailerRecord, setHasDetailerRecord] = useState(true);
   const [newDayOffDate, setNewDayOffDate] = useState('');
+  const [newDayOffEndDate, setNewDayOffEndDate] = useState('');
   const [newDayOffReason, setNewDayOffReason] = useState('');
+  const [isDateRange, setIsDateRange] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -219,13 +222,17 @@ export default function AvailabilityPage() {
           
           // If RPC fails, try direct query as fallback
           console.log('RPC failed for days off, trying direct query as fallback...');
+          const startDateStr = startDate.toISOString().split('T')[0];
+          const endDateStr = endDate.toISOString().split('T')[0];
           const { data: directDaysOffData, error: directDaysOffError } = await supabase
             .from('detailer_days_off')
             .select('*')
             .eq('detailer_id', detailerId)
             .eq('is_active', true)
-            .gte('date', startDate.toISOString().split('T')[0])
-            .lte('date', endDate.toISOString().split('T')[0])
+            // Check if the day off range overlaps with the filter range
+            // A range overlaps if: date <= filter_end_date AND (end_date IS NULL OR end_date >= filter_start_date)
+            .lte('date', endDateStr)
+            .or(`end_date.is.null,end_date.gte.${startDateStr}`)
             .order('date', { ascending: true });
 
           if (directDaysOffError) {
@@ -546,12 +553,19 @@ export default function AvailabilityPage() {
   const handleAddDayOff = async () => {
     if (!newDayOffDate) return;
 
+    // Validate date range if enabled
+    if (isDateRange && newDayOffEndDate && newDayOffEndDate < newDayOffDate) {
+      setError('End date must be after or equal to start date');
+      return;
+    }
+
     try {
       setSaving(true);
       setError(null);
 
       const { error: addError } = await supabase.rpc('add_detailer_day_off', {
         p_date: newDayOffDate,
+        p_end_date: isDateRange && newDayOffEndDate ? newDayOffEndDate : null,
         p_reason: newDayOffReason || null,
       });
 
@@ -561,7 +575,9 @@ export default function AvailabilityPage() {
       }
 
       setNewDayOffDate('');
+      setNewDayOffEndDate('');
       setNewDayOffReason('');
+      setIsDateRange(false);
       await fetchAvailability();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to add day off';
@@ -757,31 +773,74 @@ export default function AvailabilityPage() {
 
           {/* Add Day Off Form */}
           <div className="mb-6 p-4 bg-[#050B12] border border-white/5 rounded-lg">
-            <div className="flex items-center gap-3">
-              <input
-                type="date"
-                value={newDayOffDate}
-                onChange={(e) => setNewDayOffDate(e.target.value)}
-                min={new Date().toISOString().split('T')[0]}
-                disabled={saving}
-                className="px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
-                placeholder="Select date"
-              />
-              <input
-                type="text"
-                value={newDayOffReason}
-                onChange={(e) => setNewDayOffReason(e.target.value)}
-                disabled={saving}
-                className="flex-1 px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
-                placeholder="Reason (optional)"
-              />
-              <button
-                onClick={handleAddDayOff}
-                disabled={saving || !newDayOffDate}
-                className="px-4 py-2 bg-[#32CE7A] hover:bg-[#2AB869] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
-              >
-                Add
-              </button>
+            <div className="space-y-3">
+              {/* Toggle between single date and date range */}
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isDateRange}
+                    onChange={(e) => {
+                      setIsDateRange(e.target.checked);
+                      if (!e.target.checked) {
+                        setNewDayOffEndDate('');
+                      }
+                    }}
+                    disabled={saving}
+                    className="w-4 h-4 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A]"
+                  />
+                  <span className="text-[#C6CFD9] text-sm">Date Range</span>
+                </label>
+              </div>
+
+              {/* Date Inputs */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <label className="text-[#C6CFD9] text-sm whitespace-nowrap">
+                    {isDateRange ? 'Start Date:' : 'Date:'}
+                  </label>
+                  <input
+                    type="date"
+                    value={newDayOffDate}
+                    onChange={(e) => setNewDayOffDate(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    disabled={saving}
+                    className="px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
+                    placeholder="Select date"
+                  />
+                </div>
+
+                {isDateRange && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-[#C6CFD9] text-sm whitespace-nowrap">End Date:</label>
+                    <input
+                      type="date"
+                      value={newDayOffEndDate}
+                      onChange={(e) => setNewDayOffEndDate(e.target.value)}
+                      min={newDayOffDate || new Date().toISOString().split('T')[0]}
+                      disabled={saving || !newDayOffDate}
+                      className="px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
+                      placeholder="Select end date"
+                    />
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  value={newDayOffReason}
+                  onChange={(e) => setNewDayOffReason(e.target.value)}
+                  disabled={saving}
+                  className="flex-1 min-w-[200px] px-3 py-2 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#6FF0C4]"
+                  placeholder="Reason (optional)"
+                />
+                <button
+                  onClick={handleAddDayOff}
+                  disabled={saving || !newDayOffDate || (isDateRange && !newDayOffEndDate)}
+                  className="px-4 py-2 bg-[#32CE7A] hover:bg-[#2AB869] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                >
+                  Add
+                </button>
+              </div>
             </div>
           </div>
 
@@ -790,33 +849,65 @@ export default function AvailabilityPage() {
             <p className="text-[#C6CFD9] text-sm italic">No days off added</p>
           ) : (
             <div className="space-y-2">
-              {daysOff.map((dayOff) => (
-                <div
-                  key={dayOff.id}
-                  className="flex items-center justify-between p-3 bg-[#050B12] border border-white/5 rounded-lg"
-                >
-                  <div className="flex items-center gap-4">
-                    <span className="text-white font-medium">
-                      {new Date(dayOff.date).toLocaleDateString('en-US', { 
-                        weekday: 'long', 
-                        year: 'numeric', 
-                        month: 'long', 
-                        day: 'numeric' 
-                      })}
-                    </span>
-                    {dayOff.reason && (
-                      <span className="text-[#C6CFD9] text-sm">({dayOff.reason})</span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => handleRemoveDayOff(dayOff.date)}
-                    disabled={saving}
-                    className="px-3 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
+              {daysOff.map((dayOff) => {
+                // Parse dates as local dates to avoid timezone issues
+                // date strings are in YYYY-MM-DD format, parse as local date
+                const parseLocalDate = (dateStr: string) => {
+                  const [year, month, day] = dateStr.split('-').map(Number);
+                  return new Date(year, month - 1, day);
+                };
+                
+                const startDate = parseLocalDate(dayOff.date);
+                const endDate = dayOff.end_date ? parseLocalDate(dayOff.end_date) : null;
+                const isRange = endDate !== null && endDate.getTime() !== startDate.getTime();
+
+                return (
+                  <div
+                    key={dayOff.id}
+                    className="flex items-center justify-between p-3 bg-[#050B12] border border-white/5 rounded-lg"
                   >
-                    Remove
-                  </button>
-                </div>
-              ))}
+                    <div className="flex items-center gap-4 flex-wrap">
+                      <span className="text-white font-medium">
+                        {isRange ? (
+                          <>
+                            {startDate.toLocaleDateString('en-US', { 
+                              month: 'short', 
+                              day: 'numeric',
+                              year: 'numeric'
+                            })} - {endDate.toLocaleDateString('en-US', { 
+                              month: 'short', 
+                              day: 'numeric',
+                              year: 'numeric'
+                            })}
+                          </>
+                        ) : (
+                          startDate.toLocaleDateString('en-US', { 
+                            weekday: 'long', 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric' 
+                          })
+                        )}
+                      </span>
+                      {dayOff.reason && (
+                        <span className="text-[#C6CFD9] text-sm">({dayOff.reason})</span>
+                      )}
+                      {isRange && (
+                        <span className="text-[#6FF0C4] text-xs bg-[#6FF0C4]/10 px-2 py-1 rounded">
+                          Range
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleRemoveDayOff(dayOff.date)}
+                      disabled={saving}
+                      className="px-3 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

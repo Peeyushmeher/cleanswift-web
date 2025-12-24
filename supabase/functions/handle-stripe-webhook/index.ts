@@ -820,61 +820,66 @@ async function handleTransferPaid(
   console.log('🟢 Processing transfer.paid');
   console.log('Transfer ID:', transfer.id);
   console.log('Amount:', transfer.amount, 'cents');
+  console.log('Transfer metadata:', JSON.stringify(transfer.metadata || {}));
 
-  // Check if this is a weekly batch transfer
+  // Strategy 1: Check if this is a weekly batch transfer via metadata
   const weeklyBatchId = transfer.metadata?.weekly_batch_id;
   if (weeklyBatchId) {
-    console.log('📦 Processing weekly batch transfer for batch:', weeklyBatchId);
-    
-    // Update batch status to 'succeeded'
-    const { error: updateBatchError } = await supabase
-      .from('solo_weekly_payout_batches')
-      .update({
-        status: 'succeeded',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', weeklyBatchId);
+    console.log('📦 Found weekly_batch_id in metadata:', weeklyBatchId);
+    return await updateBatchAndTransfers(supabase, weeklyBatchId, transfer.id);
+  }
 
-    if (updateBatchError) {
-      console.error('❌ Failed to update batch status:', updateBatchError);
-    } else {
-      console.log('✅ Updated batch status to "succeeded"');
-    }
+  // Strategy 2: Fallback - Try to find batch by stripe_transfer_id
+  console.log('⚠️  No weekly_batch_id in metadata, trying to find batch by stripe_transfer_id');
+  const { data: batchRecord, error: batchFindError } = await supabase
+    .from('solo_weekly_payout_batches')
+    .select('id')
+    .eq('stripe_transfer_id', transfer.id)
+    .maybeSingle();
 
-    // Update all related transfers to 'succeeded'
-    const { error: updateTransfersError } = await supabase
+  if (!batchFindError && batchRecord) {
+    console.log('✅ Found batch by stripe_transfer_id:', batchRecord.id);
+    return await updateBatchAndTransfers(supabase, batchRecord.id, transfer.id);
+  }
+
+  // Strategy 3: Handle individual transfer (legacy or edge case)
+  const transferId = transfer.metadata?.transfer_id;
+  if (transferId) {
+    console.log('📝 Found transfer_id in metadata:', transferId);
+    const { error: updateError } = await supabase
       .from('detailer_transfers')
       .update({
         status: 'succeeded',
+        stripe_transfer_id: transfer.id,
         updated_at: new Date().toISOString(),
       })
-      .eq('weekly_payout_batch_id', weeklyBatchId)
-      .eq('status', 'processing'); // Only update transfers that are processing
+      .eq('id', transferId);
 
-    if (updateTransfersError) {
-      console.error('❌ Failed to update related transfers:', updateTransfersError);
+    if (updateError) {
+      console.error('❌ Failed to update transfer status:', updateError);
     } else {
-      console.log('✅ Updated all related transfers to "succeeded"');
+      console.log('✅ Updated transfer status to "succeeded"');
     }
     return;
   }
 
-  // Handle individual transfer (legacy or edge case)
-  const transferId = transfer.metadata?.transfer_id;
-  if (!transferId) {
-    // Try to find by stripe_transfer_id if metadata doesn't have transfer_id
-    const { data: transferRecord, error: findError } = await supabase
-      .from('detailer_transfers')
-      .select('id')
-      .eq('stripe_transfer_id', transfer.id)
-      .single();
+  // Strategy 4: Try to find individual transfer by stripe_transfer_id
+  console.log('⚠️  No transfer_id in metadata, trying to find transfer by stripe_transfer_id');
+  const { data: transferRecord, error: findError } = await supabase
+    .from('detailer_transfers')
+    .select('id, weekly_payout_batch_id')
+    .eq('stripe_transfer_id', transfer.id)
+    .maybeSingle();
 
-    if (findError || !transferRecord) {
-      console.log('ℹ️  Transfer record not found for Stripe transfer:', transfer.id);
-      return;
+  if (!findError && transferRecord) {
+    // If this transfer belongs to a batch, update the batch too
+    if (transferRecord.weekly_payout_batch_id) {
+      console.log('✅ Found transfer with batch_id:', transferRecord.weekly_payout_batch_id);
+      return await updateBatchAndTransfers(supabase, transferRecord.weekly_payout_batch_id, transfer.id);
     }
 
-    // Update using found transfer record ID
+    // Individual transfer
+    console.log('✅ Found individual transfer:', transferRecord.id);
     const { error: updateError } = await supabase
       .from('detailer_transfers')
       .update({
@@ -891,20 +896,52 @@ async function handleTransferPaid(
     return;
   }
 
-  // Update transfer record status to 'succeeded'
-  const { error: updateError } = await supabase
+  console.log('ℹ️  Transfer record not found for Stripe transfer:', transfer.id);
+  console.log('⚠️  Could not match Stripe transfer to any batch or transfer record');
+}
+
+/**
+ * Helper function to update batch and all related transfers to 'succeeded'
+ */
+async function updateBatchAndTransfers(
+  supabase: ReturnType<typeof createClient>,
+  batchId: string,
+  stripeTransferId: string
+) {
+  console.log('📦 Updating batch and transfers for batch:', batchId);
+
+  // Update batch status to 'succeeded'
+  const { error: updateBatchError } = await supabase
+    .from('solo_weekly_payout_batches')
+    .update({
+      status: 'succeeded',
+      stripe_transfer_id: stripeTransferId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', batchId);
+
+  if (updateBatchError) {
+    console.error('❌ Failed to update batch status:', updateBatchError);
+    return;
+  }
+
+  console.log('✅ Updated batch status to "succeeded"');
+
+  // Update all related transfers to 'succeeded'
+  const { error: updateTransfersError, count } = await supabase
     .from('detailer_transfers')
     .update({
       status: 'succeeded',
-      stripe_transfer_id: transfer.id,
+      stripe_transfer_id: stripeTransferId,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', transferId);
+    .eq('weekly_payout_batch_id', batchId)
+    .eq('status', 'processing'); // Only update transfers that are processing
 
-  if (updateError) {
-    console.error('❌ Failed to update transfer status:', updateError);
+  if (updateTransfersError) {
+    console.error('❌ Failed to update related transfers:', updateTransfersError);
   } else {
-    console.log('✅ Updated transfer status to "succeeded"');
+    console.log(`✅ Updated ${count || 0} related transfers to "succeeded"`);
   }
 }
 
