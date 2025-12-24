@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import CalendarView from '../dashboard/CalendarView';
 import FilterDropdown from '@/components/ui/FilterDropdown';
+import { formatDate } from '@/lib/detailer/dashboard-utils';
 
 interface SchedulePageClientProps {
   bookings: any[];
@@ -150,9 +151,9 @@ export default function SchedulePageClient({
                     </div>
                     <div className="text-sm text-[#C6CFD9] mt-1">
                       {booking.scheduled_date && booking.scheduled_time_start
-                        ? `${new Date(booking.scheduled_date).toLocaleDateString()} at ${booking.scheduled_time_start.substring(0, 5)}`
+                        ? `${formatDate(booking.scheduled_date)} at ${booking.scheduled_time_start.substring(0, 5)}`
                         : booking.scheduled_start
-                        ? new Date(booking.scheduled_start).toLocaleString()
+                        ? formatDate(booking.scheduled_start, 'short')
                         : 'Date TBD'}
                     </div>
                     {booking.address_line1 && (

@@ -12,6 +12,7 @@ import StatusBadge from '@/components/ui/StatusBadge';
 import JobAssignmentModal from '@/components/detailer/JobAssignmentModal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { createClient } from '@/lib/supabase/client';
+import { formatScheduledDateTime, formatScheduledTime } from '@/lib/detailer/dashboard-utils';
 
 interface BookingDetailClientProps {
   booking: any;
@@ -204,11 +205,15 @@ export default function BookingDetailClient({
               </div>
               <div>
                 <strong>Scheduled:</strong>{' '}
-                {new Date(booking.scheduled_start).toLocaleString()}
+                {booking.scheduled_date && booking.scheduled_time_start
+                  ? formatScheduledDateTime(booking.scheduled_date, booking.scheduled_time_start)
+                  : booking.scheduled_start
+                  ? new Date(booking.scheduled_start).toLocaleString()
+                  : 'Not scheduled'}
               </div>
-              {booking.scheduled_end && (
+              {booking.scheduled_time_end && (
                 <div>
-                  <strong>End Time:</strong> {new Date(booking.scheduled_end).toLocaleString()}
+                  <strong>End Time:</strong> {formatScheduledTime(booking.scheduled_time_end)}
                 </div>
               )}
             </div>

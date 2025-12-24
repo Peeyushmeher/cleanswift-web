@@ -47,7 +47,7 @@ export default function EarningsPageClient({
 
   // Prepare chart data
   const chartData = earningsData.slice(0, 7).map((booking) => ({
-    date: booking.completed_at || booking.scheduled_date || booking.created_at,
+    date: booking.scheduled_date || booking.completed_at || booking.created_at,
     amount: booking.total_amount || booking.service_price || 0,
   }));
 
@@ -164,7 +164,7 @@ export default function EarningsPageClient({
                 return (
                   <tr key={booking.id} className="hover:bg-white/5">
                     <td className="px-4 py-3 text-sm text-white">
-                      {formatDate(booking.completed_at || booking.scheduled_date, 'short')}
+                      {formatDate(booking.scheduled_date || booking.completed_at, 'short')}
                     </td>
                     <td className="px-4 py-3 text-sm text-[#C6CFD9] font-mono">
                       {booking.receipt_id}

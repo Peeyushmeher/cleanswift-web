@@ -16,9 +16,26 @@ export function formatCurrency(amount: number | string): string {
 
 /**
  * Format a date string to a readable format
+ * Handles DATE-only strings (YYYY-MM-DD) as local dates to avoid timezone issues
  */
 export function formatDate(date: string | Date, format: 'short' | 'long' | 'time' = 'short'): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
+  let d: Date;
+  
+  if (typeof date === 'string') {
+    // Check if it's a DATE-only string (YYYY-MM-DD format)
+    // This avoids timezone conversion issues where "2025-12-29" becomes Dec 28 in some timezones
+    const dateOnlyPattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (dateOnlyPattern.test(date)) {
+      // Parse as local date to avoid UTC interpretation
+      const [year, month, day] = date.split('-').map(Number);
+      d = new Date(year, month - 1, day);
+    } else {
+      // For timestamps or other formats, use standard Date parsing
+      d = new Date(date);
+    }
+  } else {
+    d = date;
+  }
   
   if (format === 'time') {
     return d.toLocaleTimeString('en-US', { 
@@ -53,6 +70,50 @@ export function formatDate(date: string | Date, format: 'short' | 'long' | 'time
 export function formatDateTime(date: string, time: string): string {
   const dateObj = new Date(`${date}T${time}`);
   return formatDate(dateObj, 'long');
+}
+
+/**
+ * Format scheduled date and time for display (avoids timezone conversion)
+ * Takes scheduled_date (YYYY-MM-DD) and scheduled_time_start (HH:MM:SS or HH:MM)
+ * and formats them without timezone conversion
+ */
+export function formatScheduledDateTime(date: string, time: string): string {
+  // Parse the date as local to avoid UTC conversion
+  const [year, month, day] = date.split('-').map(Number);
+  const dateObj = new Date(year, month - 1, day);
+  
+  // Parse time (handle both HH:MM:SS and HH:MM formats)
+  const [hours, minutes] = time.split(':').map(Number);
+  
+  // Format the date part
+  const formattedDate = dateObj.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  
+  // Format the time part (12-hour format with AM/PM)
+  const timeStr = new Date(year, month - 1, day, hours, minutes).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  
+  return `${formattedDate}, ${timeStr}`;
+}
+
+/**
+ * Format scheduled time for display (HH:MM format to 12-hour format)
+ */
+export function formatScheduledTime(time: string): string {
+  const [hours, minutes] = time.split(':').map(Number);
+  const date = new Date();
+  date.setHours(hours, minutes, 0, 0);
+  return date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 }
 
 /**
@@ -149,6 +210,21 @@ export function getPaymentStatusColor(status: string): string {
 }
 
 /**
+ * Parse a date string as a local date (handles DATE-only strings correctly)
+ */
+function parseLocalDate(dateString: string): Date {
+  // Check if it's a DATE-only string (YYYY-MM-DD format)
+  const dateOnlyPattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (dateOnlyPattern.test(dateString)) {
+    // Parse as local date to avoid UTC interpretation
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  // For timestamps or other formats, use standard Date parsing
+  return new Date(dateString);
+}
+
+/**
  * Filter bookings by date range
  */
 export function filterBookingsByDateRange(
@@ -162,7 +238,7 @@ export function filterBookingsByDateRange(
   
   return bookings.filter((booking) => {
     const bookingDate = booking.scheduled_date 
-      ? new Date(booking.scheduled_date)
+      ? parseLocalDate(booking.scheduled_date)
       : booking.scheduled_start 
       ? new Date(booking.scheduled_start)
       : null;

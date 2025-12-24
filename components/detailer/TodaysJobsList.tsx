@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { formatDateTime } from '@/lib/detailer/dashboard-utils';
+import { formatScheduledDateTime } from '@/lib/detailer/dashboard-utils';
 import StatusBadge from '@/components/ui/StatusBadge';
 import type { Booking } from '@/types/detailer';
 
@@ -34,7 +34,7 @@ export default function TodaysJobsList({ bookings }: TodaysJobsListProps) {
               </div>
               <div className="text-sm text-[#C6CFD9]">
                 {booking.scheduled_date && booking.scheduled_time_start
-                  ? formatDateTime(booking.scheduled_date, booking.scheduled_time_start)
+                  ? formatScheduledDateTime(booking.scheduled_date, booking.scheduled_time_start)
                   : booking.scheduled_start
                   ? new Date(booking.scheduled_start).toLocaleString()
                   : 'Time TBD'}
