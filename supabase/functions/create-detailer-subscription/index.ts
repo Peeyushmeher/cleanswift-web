@@ -78,7 +78,7 @@ serve(async (req) => {
     console.log('🔑 Edge Function using Stripe key type:', keyType);
 
     const stripe = new Stripe(stripeKey, {
-      apiVersion: '2023-10-16',
+      apiVersion: '2025-12-15.clover',
       httpClient: Stripe.createFetchHttpClient(),
     });
 
