@@ -425,7 +425,7 @@ function LoginForm() {
               </div>
             )}
 
-            <div>
+            <div suppressHydrationWarning>
               <label htmlFor="email" className="block text-sm font-medium mb-2 text-slate-300">
                 Email Address
               </label>
@@ -441,7 +441,7 @@ function LoginForm() {
               />
             </div>
 
-            <div>
+            <div suppressHydrationWarning>
               <div className="flex items-center justify-between mb-2">
                 <label htmlFor="password" className="block text-sm font-medium text-slate-300">
                   Password
