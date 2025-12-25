@@ -189,6 +189,134 @@ export default async function AdminSettingsPage() {
     revalidatePath('/admin/settings');
   }
 
+  async function updateSubscriptionPrice(formData: FormData) {
+    'use server';
+    const supabase = await createClient();
+    
+    // Verify user is authenticated and is an admin
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      throw new Error('Not authenticated');
+    }
+    
+    // Check if user is admin
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+    
+    if (profileError || !profile || profile.role !== 'admin') {
+      throw new Error('Only admins can update platform settings');
+    }
+    
+    const priceStr = formData.get('subscription_monthly_price') as string;
+    const price = parseFloat(priceStr);
+    
+    if (isNaN(price) || price <= 0 || price > 999) {
+      throw new Error('Subscription price must be between 0.01 and 999');
+    }
+
+    console.log('Updating subscription price to:', price, 'User ID:', user.id);
+
+    // First, create a new Stripe price via Edge Function
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (!supabaseUrl || !serviceRoleKey) {
+      throw new Error('Server configuration error');
+    }
+
+    try {
+      const functionUrl = `${supabaseUrl}/functions/v1/create-subscription-price`;
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${serviceRoleKey}`,
+        },
+        body: JSON.stringify({ amount: price }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to create Stripe price');
+      }
+
+      const result = await response.json();
+      console.log('Created new Stripe price:', result.price_id);
+
+      // Update subscription_monthly_price in platform_settings
+      const { error: updateError } = await supabase
+        .from('platform_settings')
+        .update({
+          value: price,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('key', 'subscription_monthly_price');
+      
+      if (updateError) {
+        console.error('Error updating subscription monthly price:', updateError);
+        throw new Error(`Failed to update subscription price: ${updateError.message}`);
+      }
+      
+      console.log('Subscription price updated successfully to:', price);
+    } catch (error) {
+      console.error('Error updating subscription price:', error);
+      throw error instanceof Error ? error : new Error('Failed to update subscription price');
+    }
+    
+    revalidatePath('/admin/settings');
+  }
+
+  async function updateSubscriptionPlatformFee(formData: FormData) {
+    'use server';
+    const supabase = await createClient();
+    
+    // Verify user is authenticated and is an admin
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      throw new Error('Not authenticated');
+    }
+    
+    // Check if user is admin
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+    
+    if (profileError || !profile || profile.role !== 'admin') {
+      throw new Error('Only admins can update platform settings');
+    }
+    
+    const feePercentageStr = formData.get('subscription_platform_fee_percentage') as string;
+    const feePercentage = parseFloat(feePercentageStr);
+    
+    if (isNaN(feePercentage) || feePercentage < 0 || feePercentage > 100) {
+      throw new Error('Subscription platform fee percentage must be between 0 and 100');
+    }
+
+    console.log('Updating subscription platform fee to:', feePercentage, 'User ID:', user.id);
+
+    const { error: updateError } = await supabase
+      .from('platform_settings')
+      .update({
+        value: feePercentage,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('key', 'subscription_platform_fee_percentage');
+    
+    if (updateError) {
+      console.error('Error updating subscription platform fee:', updateError);
+      throw new Error(`Failed to update subscription platform fee: ${updateError.message}`);
+    }
+    
+    console.log('Subscription platform fee updated successfully to:', feePercentage);
+    
+    revalidatePath('/admin/settings');
+  }
+
   const bookingRules = settings?.booking_rules || {
     minimum_notice_hours: 24,
     cancellation_cutoff_hours: 4,
@@ -210,6 +338,20 @@ export default async function AdminSettingsPage() {
         : parseFloat(settings.platform_fee_percentage as string))
     : 15;
 
+  // Subscription monthly price
+  const subscriptionMonthlyPrice = settings?.subscription_monthly_price
+    ? (typeof settings.subscription_monthly_price === 'number'
+        ? settings.subscription_monthly_price
+        : parseFloat(settings.subscription_monthly_price as string))
+    : 29.99;
+
+  // Subscription platform fee percentage
+  const subscriptionPlatformFeePercentage = settings?.subscription_platform_fee_percentage
+    ? (typeof settings.subscription_platform_fee_percentage === 'number'
+        ? settings.subscription_platform_fee_percentage
+        : parseFloat(settings.subscription_platform_fee_percentage as string))
+    : 3;
+
   return (
     <div className="p-6 lg:p-8">
       {/* Header */}
@@ -224,7 +366,7 @@ export default async function AdminSettingsPage() {
           <svg className="w-5 h-5 text-[#32CE7A]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
           </svg>
-          Platform Fee Percentage
+          Percentage Model - Platform Fee
         </h2>
         <form action={updatePlatformFee} className="space-y-4" suppressHydrationWarning>
           <div>
@@ -240,7 +382,7 @@ export default async function AdminSettingsPage() {
               suppressHydrationWarning
             />
             <p className="text-xs text-[#C6CFD9]/60 mt-1">
-              The percentage of each booking that goes to the platform. This affects all future bookings.
+              The percentage of each booking that goes to the platform for detailers on the percentage model. This affects all future bookings.
             </p>
           </div>
           <button
@@ -250,6 +392,72 @@ export default async function AdminSettingsPage() {
             Save Platform Fee
           </button>
         </form>
+      </div>
+
+      {/* Subscription Model Settings */}
+      <div className="mb-6 bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
+        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+          <svg className="w-5 h-5 text-cyan-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z" />
+          </svg>
+          Subscription Model Settings
+        </h2>
+        <div className="space-y-6">
+          {/* Subscription Monthly Price */}
+          <form action={updateSubscriptionPrice} className="space-y-4" suppressHydrationWarning>
+            <div>
+              <label className="text-sm text-[#C6CFD9] mb-1 block">Monthly Subscription Price ($)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white">$</span>
+                <input
+                  type="number"
+                  name="subscription_monthly_price"
+                  defaultValue={subscriptionMonthlyPrice}
+                  min="0.01"
+                  max="999"
+                  step="0.01"
+                  className="w-full pl-7 pr-3 py-2 bg-[#050B12] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                  suppressHydrationWarning
+                />
+              </div>
+              <p className="text-xs text-[#C6CFD9]/60 mt-1">
+                The monthly subscription price for detailers. This will create a new Stripe price for future subscriptions.
+              </p>
+            </div>
+            <button
+              type="submit"
+              className="w-full px-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-white font-medium rounded-lg transition-colors"
+            >
+              Save Subscription Price
+            </button>
+          </form>
+
+          {/* Subscription Platform Fee */}
+          <form action={updateSubscriptionPlatformFee} className="space-y-4" suppressHydrationWarning>
+            <div>
+              <label className="text-sm text-[#C6CFD9] mb-1 block">Platform Fee Percentage (%)</label>
+              <input
+                type="number"
+                name="subscription_platform_fee_percentage"
+                defaultValue={subscriptionPlatformFeePercentage}
+                min="0"
+                max="100"
+                step="0.1"
+                className="w-full px-3 py-2 bg-[#050B12] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                suppressHydrationWarning
+              />
+              <p className="text-xs text-[#C6CFD9]/60 mt-1">
+                The percentage of each booking that goes to the platform for detailers on the subscription model (for payment processing only). This affects all future bookings.
+              </p>
+            </div>
+            <button
+              type="submit"
+              className="w-full px-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-white font-medium rounded-lg transition-colors"
+            >
+              Save Subscription Platform Fee
+            </button>
+          </form>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

@@ -61,6 +61,30 @@ function LoginForm() {
     setPassword('');
   };
 
+  // Check if subscription payment is needed
+  const checkSubscriptionPayment = async () => {
+    try {
+      const response = await fetch('/api/detailer/subscription/check-payment');
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.needsPayment) {
+          console.log('⚠ Subscription payment required, redirecting to payment page');
+          window.location.href = '/detailer/subscription/payment';
+          return;
+        }
+      }
+      
+      // Payment not needed or check failed, proceed to dashboard
+      console.log('✓ No subscription payment needed, redirecting to dashboard');
+      window.location.href = '/detailer/dashboard';
+    } catch (error) {
+      console.error('Error checking subscription payment:', error);
+      // On error, proceed to dashboard (payment check will happen there)
+      window.location.href = '/detailer/dashboard';
+    }
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -267,13 +291,14 @@ function LoginForm() {
         if (!profile?.onboarding_completed) {
           console.warn('⚠ Detailer is active but onboarding_completed is false. Allowing access to dashboard.');
           // Still redirect to dashboard since they're active and approved
-          window.location.href = '/detailer/dashboard';
+          // But check subscription payment first
+          await checkSubscriptionPayment();
           return;
         }
 
-        // Detailer is active and onboarding completed, redirect to dashboard
-        console.log('✓ Detailer is active and onboarding completed, redirecting to /detailer/dashboard');
-        window.location.href = '/detailer/dashboard';
+        // Detailer is active and onboarding completed, check subscription payment before redirecting
+        console.log('✓ Detailer is active and onboarding completed, checking subscription payment...');
+        await checkSubscriptionPayment();
       } else {
         // Regular users or no role
         console.log('No detailer role found. Profile:', profile);

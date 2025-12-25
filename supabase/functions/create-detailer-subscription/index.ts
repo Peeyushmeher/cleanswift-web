@@ -72,6 +72,11 @@ serve(async (req) => {
       );
     }
 
+    // Log key type for debugging (first few characters only)
+    const keyPrefix = stripeKey.substring(0, 7);
+    const keyType = keyPrefix === 'sk_test' ? 'TEST' : keyPrefix === 'sk_live' ? 'LIVE' : 'UNKNOWN';
+    console.log('🔑 Edge Function using Stripe key type:', keyType);
+
     const stripe = new Stripe(stripeKey, {
       apiVersion: '2023-10-16',
       httpClient: Stripe.createFetchHttpClient(),
@@ -207,16 +212,32 @@ serve(async (req) => {
       console.log('Using existing Stripe customer:', stripeCustomerId);
     }
 
-    // Create subscription
-    // Note: You'll need to create a product and price in Stripe Dashboard first
-    // For now, we'll use a placeholder price ID - this should be configured as an env var
-    const subscriptionPriceId = Deno.env.get('STRIPE_SUBSCRIPTION_PRICE_ID');
+    // Get subscription price ID from database (with env var fallback)
+    // First try to get from platform_settings
+    const { data: priceSetting } = await supabase
+      .from('platform_settings')
+      .select('value')
+      .eq('key', 'subscription_price_id')
+      .maybeSingle();
+    
+    let subscriptionPriceId: string | null = null;
+    
+    if (priceSetting && priceSetting.value && typeof priceSetting.value === 'string' && priceSetting.value !== 'null') {
+      subscriptionPriceId = priceSetting.value;
+      console.log('✅ Using subscription price ID from database:', subscriptionPriceId);
+    } else {
+      // Fallback to environment variable
+      subscriptionPriceId = Deno.env.get('STRIPE_SUBSCRIPTION_PRICE_ID') || null;
+      if (subscriptionPriceId) {
+        console.log('✅ Using subscription price ID from environment variable');
+      }
+    }
     
     if (!subscriptionPriceId) {
-      console.error('❌ STRIPE_SUBSCRIPTION_PRICE_ID not configured');
+      console.error('❌ Subscription price ID not found in database or environment');
       return new Response(
         JSON.stringify({ 
-          error: 'Subscription price ID not configured. Please set STRIPE_SUBSCRIPTION_PRICE_ID environment variable.',
+          error: 'Subscription price ID not configured. Please configure subscription price in admin settings or set STRIPE_SUBSCRIPTION_PRICE_ID environment variable.',
           success: false 
         }),
         {
@@ -227,6 +248,34 @@ serve(async (req) => {
     }
 
     console.log('Creating Stripe subscription for customer:', stripeCustomerId);
+    console.log('Using price ID:', subscriptionPriceId);
+    console.log('Stripe key type:', keyType);
+    
+    // Verify the price exists before creating subscription
+    try {
+      const price = await stripe.prices.retrieve(subscriptionPriceId);
+      console.log('✅ Verified price exists:', price.id, 'Amount:', price.unit_amount, price.currency);
+    } catch (priceError: any) {
+      console.error('❌ Price verification failed:', priceError.message);
+      if (priceError.code === 'resource_missing') {
+        console.error('❌ CRITICAL: Price ID does not exist in Stripe!');
+        console.error('❌ Price ID:', subscriptionPriceId);
+        console.error('❌ This price ID needs to be created in Stripe or updated in platform_settings');
+        return new Response(
+          JSON.stringify({ 
+            error: `Subscription price ID '${subscriptionPriceId}' does not exist in Stripe. Please create the price in Stripe Dashboard or update the price ID in admin settings.`,
+            success: false,
+            price_id: subscriptionPriceId
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      throw priceError;
+    }
+    
     const subscription = await stripe.subscriptions.create({
       customer: stripeCustomerId,
       items: [{ price: subscriptionPriceId }],
@@ -242,6 +291,29 @@ serve(async (req) => {
     });
 
     console.log('✅ Created Stripe subscription:', subscription.id);
+    console.log('✅ Subscription status:', subscription.status);
+    console.log('✅ Subscription created in Stripe account type:', keyType);
+
+    // Verify the subscription actually exists by retrieving it
+    try {
+      const verifySubscription = await stripe.subscriptions.retrieve(subscription.id);
+      console.log('✅ Verified subscription exists in Stripe:', verifySubscription.id);
+    } catch (verifyError: any) {
+      console.error('❌ CRITICAL: Subscription was created but cannot be retrieved!');
+      console.error('❌ Verification error:', verifyError.message);
+      console.error('❌ This suggests a Stripe key mismatch or account issue');
+      return new Response(
+        JSON.stringify({ 
+          error: 'Subscription created but verification failed. Please check Stripe key configuration.',
+          subscription_id: subscription.id,
+          success: false 
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
 
     // Update detailer with subscription ID
     const { error: updateError } = await supabase
@@ -255,6 +327,8 @@ serve(async (req) => {
     if (updateError) {
       console.error('❌ Failed to update detailer with subscription ID:', updateError);
       // Don't fail - subscription was created successfully
+    } else {
+      console.log('✅ Updated detailer record with subscription ID:', subscription.id);
     }
 
     const response: SubscriptionResponse = {

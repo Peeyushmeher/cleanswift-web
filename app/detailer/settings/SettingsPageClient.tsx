@@ -21,6 +21,40 @@ export default function SettingsPageClient({
   const router = useRouter();
   const supabase = createClient();
   const [isSaving, setIsSaving] = useState(false);
+  const [subscriptionPrice, setSubscriptionPrice] = useState<number>(29.99);
+  const [platformFeePercentage, setPlatformFeePercentage] = useState<number>(15);
+
+  // Fetch current pricing information
+  useEffect(() => {
+    async function fetchPricing() {
+      try {
+        // Fetch subscription monthly price
+        const { data: subscriptionPriceData } = await supabase
+          .from('platform_settings')
+          .select('value')
+          .eq('key', 'subscription_monthly_price')
+          .maybeSingle();
+        
+        if (subscriptionPriceData?.value) {
+          const price = typeof subscriptionPriceData.value === 'number' 
+            ? subscriptionPriceData.value 
+            : parseFloat(String(subscriptionPriceData.value)) || 29.99;
+          setSubscriptionPrice(price);
+        }
+
+        // Fetch platform fee percentage
+        const { data: feeData } = await supabase.rpc('get_platform_fee_percentage');
+        if (feeData !== null && feeData !== undefined) {
+          setPlatformFeePercentage(parseFloat(String(feeData)) || 15);
+        }
+      } catch (error) {
+        console.error('Error fetching pricing information:', error);
+        // Use defaults if fetch fails
+      }
+    }
+
+    fetchPricing();
+  }, [supabase]);
 
   // Check for OAuth callback parameters
   useEffect(() => {
@@ -213,8 +247,8 @@ export default function SettingsPageClient({
               <p className="text-[#C6CFD9] mb-2">Current Model</p>
               <p className="text-white font-medium">
                 {detailer?.pricing_model === 'subscription' 
-                  ? 'Monthly Subscription ($29.99/month)' 
-                  : 'Pay Per Booking (15% platform fee)'}
+                  ? `Monthly Subscription ($${subscriptionPrice.toFixed(2)}/month)` 
+                  : `Pay Per Booking (${platformFeePercentage}% platform fee)`}
               </p>
               {detailer?.stripe_subscription_id && (
                 <p className="text-sm text-[#C6CFD9] mt-1">
@@ -237,7 +271,7 @@ export default function SettingsPageClient({
                   if (detailer.pricing_model === 'subscription') {
                     return;
                   }
-                  if (!confirm('Are you sure you want to switch to Monthly Subscription? This will start a $29.99/month charge.')) {
+                  if (!confirm(`Are you sure you want to switch to Monthly Subscription? This will start a $${subscriptionPrice.toFixed(2)}/month charge.`)) {
                     return;
                   }
                   try {

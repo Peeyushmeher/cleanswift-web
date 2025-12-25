@@ -129,6 +129,95 @@ export async function calculatePlatformFee(
 }
 
 /**
+ * Get the subscription monthly price from the database
+ * Returns the price as a number (e.g., 29.99 for $29.99)
+ * Defaults to 29.99 if not set
+ */
+export async function getSubscriptionMonthlyPrice(): Promise<number> {
+  const supabase = await createClient();
+  
+  try {
+    const { data, error } = await supabase
+      .from('platform_settings')
+      .select('value')
+      .eq('key', 'subscription_monthly_price')
+      .maybeSingle();
+    
+    if (error) {
+      console.error('Error fetching subscription monthly price:', error);
+      return 29.99; // Default fallback
+    }
+    
+    if (!data) {
+      console.warn('Subscription monthly price not found in database, using default $29.99');
+      return 29.99;
+    }
+    
+    // Extract numeric value from JSONB
+    let value: number;
+    if (typeof data.value === 'number') {
+      value = data.value;
+    } else if (typeof data.value === 'string') {
+      value = parseFloat(data.value) || 29.99;
+    } else {
+      const stringValue = JSON.stringify(data.value);
+      value = parseFloat(stringValue) || 29.99;
+    }
+    
+    return value;
+  } catch (error) {
+    console.error('Unexpected error fetching subscription monthly price:', error);
+    return 29.99; // Default fallback
+  }
+}
+
+/**
+ * Get the subscription Stripe Price ID from the database
+ * Returns the price ID string or null
+ * Falls back to STRIPE_SUBSCRIPTION_PRICE_ID env var if not set in DB
+ */
+export async function getSubscriptionPriceId(): Promise<string | null> {
+  const supabase = await createClient();
+  
+  try {
+    const { data, error } = await supabase
+      .from('platform_settings')
+      .select('value')
+      .eq('key', 'subscription_price_id')
+      .maybeSingle();
+    
+    if (error) {
+      console.error('Error fetching subscription price ID:', error);
+      // Fallback to env var
+      return process.env.STRIPE_SUBSCRIPTION_PRICE_ID || null;
+    }
+    
+    if (!data || !data.value || data.value === null || data.value === 'null') {
+      // Fallback to env var if DB value is null or doesn't exist
+      return process.env.STRIPE_SUBSCRIPTION_PRICE_ID || null;
+    }
+    
+    // Extract string value from JSONB
+    let value: string | null;
+    if (typeof data.value === 'string') {
+      value = data.value === 'null' ? null : data.value;
+    } else if (typeof data.value === 'number') {
+      value = String(data.value);
+    } else {
+      const stringValue = JSON.stringify(data.value);
+      value = stringValue === 'null' || stringValue === '""' ? null : stringValue.replace(/^"|"$/g, '');
+    }
+    
+    // If value is null or empty, fallback to env var
+    return value || process.env.STRIPE_SUBSCRIPTION_PRICE_ID || null;
+  } catch (error) {
+    console.error('Unexpected error fetching subscription price ID:', error);
+    // Fallback to env var
+    return process.env.STRIPE_SUBSCRIPTION_PRICE_ID || null;
+  }
+}
+
+/**
  * Calculate detailer payout from a total amount
  * @param totalAmount - The total booking amount
  * @param feePercentage - Optional fee percentage (will fetch from DB if not provided)

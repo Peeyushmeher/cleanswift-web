@@ -8,6 +8,7 @@ import EarningsChart from '@/components/detailer/EarningsChart';
 import AvailabilityCalendar from '@/components/detailer/AvailabilityCalendar';
 import { filterBookingsByDateRange, calculateEarnings, formatCurrency, formatDate } from '@/lib/detailer/dashboard-utils';
 import { getDetailerOrganization, getOrganizationRole } from '@/lib/detailer/mode-detection';
+import PaymentCheck from './PaymentCheck';
 
 export default async function DetailerDashboardPage() {
   const profile = await requireDetailer();
@@ -320,6 +321,7 @@ export default async function DetailerDashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#050B12] text-white">
+      <PaymentCheck />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-white mb-2">Dashboard</h1>

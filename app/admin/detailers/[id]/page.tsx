@@ -261,6 +261,16 @@ export default async function AdminDetailerProfilePage({ params }: { params: Pro
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             console.error('Failed to create subscription:', errorData);
+            
+            // If it's a price error, log it clearly
+            if (errorData.error && errorData.error.includes('No such price')) {
+              console.error('❌ CRITICAL: Subscription price ID is invalid or missing in Stripe!');
+              console.error('❌ Price ID error:', errorData.error);
+              console.error('❌ Please check:');
+              console.error('   1. Go to Stripe Dashboard → Products → Prices');
+              console.error('   2. Verify the price ID exists in your Stripe account');
+              console.error('   3. Update the price ID in admin settings or Supabase Edge Functions environment variables');
+            }
             // Don't fail the approval - subscription can be created manually later
           } else {
             const result = await response.json();
