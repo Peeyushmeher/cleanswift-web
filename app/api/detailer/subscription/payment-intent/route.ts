@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     console.log('Using Stripe key type:', keyPrefix === 'sk_test' ? 'TEST' : keyPrefix === 'sk_live' ? 'LIVE' : 'UNKNOWN');
 
     const stripe = new Stripe(stripeKey, {
-      apiVersion: '2023-10-16',
+      apiVersion: '2025-12-15.clover',
     });
 
     try {
