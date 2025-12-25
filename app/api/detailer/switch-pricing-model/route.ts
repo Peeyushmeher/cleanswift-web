@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { getSubscriptionPriceId } from '@/lib/platform-settings';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {

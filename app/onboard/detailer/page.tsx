@@ -44,6 +44,8 @@ export default function SoloDetailerOnboardingPage() {
     pricing_model: null,
   });
   const [errors, setErrors] = useState<Partial<Record<string, string>>>({});
+  const [subscriptionPrice, setSubscriptionPrice] = useState<number>(29.99);
+  const [platformFeePercentage, setPlatformFeePercentage] = useState<number>(15);
 
   useEffect(() => {
     async function fetchUser() {
@@ -63,6 +65,38 @@ export default function SoloDetailerOnboardingPage() {
       }
     }
     fetchUser();
+  }, []);
+
+  useEffect(() => {
+    async function fetchPricing() {
+      const supabase = createClient();
+      try {
+        // Fetch subscription monthly price
+        const { data: subscriptionPriceData } = await supabase
+          .from('platform_settings')
+          .select('value')
+          .eq('key', 'subscription_monthly_price')
+          .maybeSingle();
+        
+        if (subscriptionPriceData?.value) {
+          const price = typeof subscriptionPriceData.value === 'number' 
+            ? subscriptionPriceData.value 
+            : parseFloat(String(subscriptionPriceData.value)) || 29.99;
+          setSubscriptionPrice(price);
+        }
+
+        // Fetch platform fee percentage
+        const { data: feeData } = await supabase.rpc('get_platform_fee_percentage');
+        if (feeData !== null && feeData !== undefined) {
+          setPlatformFeePercentage(parseFloat(String(feeData)) || 15);
+        }
+      } catch (error) {
+        console.error('Error fetching pricing information:', error);
+        // Use defaults if fetch fails
+      }
+    }
+
+    fetchPricing();
   }, []);
 
   const validateStep = (step: number): boolean => {
@@ -512,9 +546,9 @@ export default function SoloDetailerOnboardingPage() {
                     <dt className="text-slate-400">Model:</dt>
                     <dd className="font-medium">
                       {formData.pricing_model === 'subscription' 
-                        ? 'Monthly Subscription ($29.99/month)' 
+                        ? `Monthly Subscription ($${subscriptionPrice.toFixed(2)}/month)` 
                         : formData.pricing_model === 'percentage'
-                        ? 'Pay Per Booking (15% platform fee)'
+                        ? `Pay Per Booking (${platformFeePercentage}% platform fee)`
                         : 'Not selected'}
                     </dd>
                   </div>
