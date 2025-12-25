@@ -136,7 +136,9 @@ export async function GET(request: NextRequest) {
               paymentIntent = typeof finalizedPaymentIntent === 'string'
                 ? await stripe.paymentIntents.retrieve(finalizedPaymentIntent)
                 : finalizedPaymentIntent;
-              console.log('Payment intent after finalization:', paymentIntent.id, paymentIntent.status);
+              if (paymentIntent && typeof paymentIntent === 'object' && 'id' in paymentIntent) {
+                console.log('Payment intent after finalization:', paymentIntent.id, paymentIntent.status);
+              }
             }
           } catch (finalizeError: any) {
             console.error('Error finalizing invoice:', finalizeError);
