@@ -92,10 +92,14 @@ export async function GET(request: NextRequest) {
       }
 
       console.log('Invoice status:', latestInvoice.status);
-      console.log('Invoice payment intent:', latestInvoice.payment_intent);
-
+      
       // Get payment intent from invoice
-      let paymentIntent = latestInvoice.payment_intent;
+      // payment_intent can be a string ID or an expanded PaymentIntent object
+      let paymentIntent: string | Stripe.PaymentIntent | null = null;
+      if (typeof latestInvoice === 'object' && 'payment_intent' in latestInvoice) {
+        paymentIntent = (latestInvoice as any).payment_intent;
+        console.log('Invoice payment intent:', paymentIntent);
+      }
       console.log('Payment intent from invoice:', paymentIntent ? (typeof paymentIntent === 'string' ? paymentIntent : paymentIntent.id) : 'null');
       
       // If payment intent is a string ID, retrieve it
@@ -121,12 +125,17 @@ export async function GET(request: NextRequest) {
             });
             
             console.log('Invoice finalized, status:', finalizedInvoice.status);
-            console.log('Finalized invoice payment intent:', finalizedInvoice.payment_intent);
             
-            if (finalizedInvoice.payment_intent) {
-              paymentIntent = typeof finalizedInvoice.payment_intent === 'string'
-                ? await stripe.paymentIntents.retrieve(finalizedInvoice.payment_intent)
-                : finalizedInvoice.payment_intent;
+            // Get payment intent from finalized invoice
+            const finalizedPaymentIntent = typeof finalizedInvoice === 'object' && 'payment_intent' in finalizedInvoice
+              ? (finalizedInvoice as any).payment_intent
+              : null;
+            console.log('Finalized invoice payment intent:', finalizedPaymentIntent);
+            
+            if (finalizedPaymentIntent) {
+              paymentIntent = typeof finalizedPaymentIntent === 'string'
+                ? await stripe.paymentIntents.retrieve(finalizedPaymentIntent)
+                : finalizedPaymentIntent;
               console.log('Payment intent after finalization:', paymentIntent.id, paymentIntent.status);
             }
           } catch (finalizeError: any) {

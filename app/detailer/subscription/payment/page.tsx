@@ -105,7 +105,7 @@ export default async function SubscriptionPaymentPage({
         if (subscription.status === 'active' || subscription.status === 'trialing') {
           const latestInvoice = subscription.latest_invoice;
           if (latestInvoice && typeof latestInvoice === 'object' && 'payment_intent' in latestInvoice) {
-            const paymentIntent = latestInvoice.payment_intent;
+            const paymentIntent = (latestInvoice as any).payment_intent;
             if (paymentIntent && typeof paymentIntent === 'object' && 'status' in paymentIntent) {
               const paymentIntentStatus = paymentIntent.status as string;
               if (paymentIntentStatus === 'succeeded') {
