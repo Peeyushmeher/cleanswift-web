@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { getSubscriptionPriceId } from '@/lib/platform-settings';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -49,13 +49,16 @@ export async function POST(request: NextRequest) {
       }
 
       // First, update pricing model so Edge Function can validate it
-      const { error: updateError } = await supabase
+      // Use service client to bypass RLS (we've already verified user owns this detailer)
+      const serviceClient = createServiceClient();
+      const { error: updateError } = await serviceClient
         .from('detailers')
         .update({
           pricing_model: pricing_model,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', detailer.id);
+        .eq('id', detailer.id)
+        .eq('profile_id', user.id); // Extra safety check
 
       if (updateError) {
         console.error('Error updating detailer:', updateError);
@@ -63,72 +66,140 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const functionUrl = `${supabaseUrl}/functions/v1/create-detailer-subscription`;
-        const response = await fetch(functionUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-          },
-          body: JSON.stringify({ detailer_id: detailer.id }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          // If subscription creation fails, revert pricing model
+        const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!serviceRoleKey) {
+          console.error('SUPABASE_SERVICE_ROLE_KEY not configured');
+          // Revert pricing model
           await supabase
             .from('detailers')
             .update({
-              pricing_model: detailer.pricing_model, // Revert to previous model
+              pricing_model: detailer.pricing_model,
               updated_at: new Date().toISOString(),
             })
             .eq('id', detailer.id);
           
           return NextResponse.json({ 
-            error: errorData.error || 'Failed to create subscription' 
+            error: 'Server configuration error. Please contact support.',
+            code: 'MISSING_SERVICE_ROLE_KEY'
           }, { status: 500 });
         }
 
-        const result = await response.json();
+        const functionUrl = `${supabaseUrl}/functions/v1/create-detailer-subscription`;
+        console.log('Calling subscription creation Edge Function:', functionUrl);
+        
+        const response = await fetch(functionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${serviceRoleKey}`,
+          },
+          body: JSON.stringify({ detailer_id: detailer.id }),
+        });
 
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error occurred' }));
+          console.error('Subscription creation failed:', errorData);
+          
+          // If subscription creation fails, revert pricing model
+          await serviceClient
+            .from('detailers')
+            .update({
+              pricing_model: detailer.pricing_model, // Revert to previous model
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', detailer.id)
+            .eq('profile_id', user.id);
+          
+          return NextResponse.json({ 
+            error: errorData.error || 'Failed to create subscription',
+            details: errorData.details || errorData.message,
+            code: errorData.code || 'SUBSCRIPTION_CREATE_FAILED'
+          }, { status: response.status || 500 });
+        }
+
+        const result = await response.json();
+        console.log('Subscription created successfully:', result.stripe_subscription_id);
+
+        // Return success with flag indicating payment is needed
         return NextResponse.json({ 
           success: true, 
-          message: 'Pricing model updated. Please complete subscription setup in Stripe.' 
+          message: 'Subscription created successfully. Please complete payment setup.',
+          requiresPayment: true,
+          subscriptionId: result.stripe_subscription_id,
+          paymentUrl: '/detailer/subscription/payment'
         });
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error creating subscription:', error);
+        console.error('Error type:', error?.constructor?.name);
+        console.error('Error message:', error?.message);
+        console.error('Error stack:', error?.stack);
+        
         // Revert pricing model on error
-        await supabase
+        const serviceClientForRevert = createServiceClient();
+        await serviceClientForRevert
           .from('detailers')
           .update({
             pricing_model: detailer.pricing_model, // Revert to previous model
             updated_at: new Date().toISOString(),
           })
-          .eq('id', detailer.id);
+          .eq('id', detailer.id)
+          .eq('profile_id', user.id);
         
         return NextResponse.json({ 
-          error: 'Failed to create subscription' 
+          error: 'Failed to create subscription. Please try again or contact support.',
+          details: error?.message || 'Network or server error occurred',
+          code: 'SUBSCRIPTION_CREATE_ERROR'
         }, { status: 500 });
       }
     } else {
       // Switching to percentage model - just update database
-      const { error: updateError } = await supabase
+      console.log('Switching to percentage model for detailer:', detailer.id);
+      console.log('Current pricing_model:', detailer.pricing_model);
+      console.log('New pricing_model:', pricing_model);
+      
+      // Use service client to bypass RLS (since detailers can't directly update their own record via RLS)
+      // We've already verified the user owns this detailer record via the initial query
+      const serviceClient = createServiceClient();
+      const { data: updatedDetailer, error: updateError } = await serviceClient
         .from('detailers')
         .update({
           pricing_model: pricing_model,
           stripe_subscription_id: null, // Clear subscription ID (webhook will handle Stripe side)
           updated_at: new Date().toISOString(),
         })
-        .eq('id', detailer.id);
+        .eq('id', detailer.id)
+        .eq('profile_id', user.id) // Extra safety check: ensure user owns this detailer
+        .select('id, pricing_model, stripe_subscription_id')
+        .single();
 
       if (updateError) {
         console.error('Error updating detailer:', updateError);
-        return NextResponse.json({ error: 'Failed to update pricing model' }, { status: 500 });
+        console.error('Update error details:', JSON.stringify(updateError, null, 2));
+        return NextResponse.json({ 
+          error: 'Failed to update pricing model',
+          details: updateError.message,
+          code: 'UPDATE_FAILED'
+        }, { status: 500 });
       }
+
+      if (!updatedDetailer) {
+        console.error('Update succeeded but no data returned');
+        return NextResponse.json({ 
+          error: 'Update completed but could not verify',
+          code: 'UPDATE_VERIFICATION_FAILED'
+        }, { status: 500 });
+      }
+
+      console.log('Successfully updated detailer:', {
+        id: updatedDetailer.id,
+        pricing_model: updatedDetailer.pricing_model,
+        stripe_subscription_id: updatedDetailer.stripe_subscription_id
+      });
 
       return NextResponse.json({ 
         success: true, 
-        message: 'Pricing model updated to Pay Per Booking' 
+        message: 'Pricing model updated to Pay Per Booking',
+        pricing_model: updatedDetailer.pricing_model
       });
     }
   } catch (error) {

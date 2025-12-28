@@ -38,3 +38,4 @@ CREATE POLICY "Detailers can view customer profiles for assigned bookings"
 -- security and avoids recursion issues.
 -- ============================================================================
 
+
