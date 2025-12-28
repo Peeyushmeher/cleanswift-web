@@ -55,3 +55,4 @@ CREATE POLICY "Detailers can view customer cars for assigned bookings"
 -- bypass RLS safely, avoiding infinite recursion issues.
 -- ============================================================================
 
+

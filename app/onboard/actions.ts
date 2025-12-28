@@ -389,6 +389,42 @@ export async function createDetailerProfile(
       });
     }
 
+    // Step 3b: Create subscription if pricing model is 'subscription'
+    if (data.pricing_model === 'subscription') {
+      try {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        
+        if (supabaseUrl && serviceRoleKey) {
+          console.log('Creating subscription for detailer during onboarding:', detailer.id);
+          const functionUrl = `${supabaseUrl}/functions/v1/create-detailer-subscription`;
+          
+          const response = await fetch(functionUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${serviceRoleKey}`,
+            },
+            body: JSON.stringify({ detailer_id: detailer.id }),
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log('✅ Subscription created during onboarding:', result.stripe_subscription_id);
+          } else {
+            const errorData = await response.json().catch(() => ({}));
+            console.warn('⚠️ Subscription creation failed during onboarding (non-blocking):', errorData.error || 'Unknown error');
+            // Don't fail onboarding - subscription can be created later when user completes payment setup
+          }
+        } else {
+          console.warn('⚠️ Supabase URL or Service Role Key not configured - skipping subscription creation during onboarding');
+        }
+      } catch (subscriptionError: any) {
+        console.error('⚠️ Error creating subscription during onboarding (non-blocking):', subscriptionError);
+        // Don't fail onboarding - subscription can be created later
+      }
+    }
+
     // Step 4: Create user address using service client (bypasses RLS, works without authentication)
     try {
       const serviceClient = createServiceClient();

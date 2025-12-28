@@ -280,16 +280,34 @@ export default function SettingsPageClient({
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ pricing_model: 'subscription' }),
                     });
+                    
+                    const data = await response.json();
+                    
                     if (response.ok) {
-                      router.refresh();
-                      alert('Pricing model updated successfully!');
+                      // Wait a moment for database update to complete
+                      await new Promise(resolve => setTimeout(resolve, 500));
+                      
+                      // If payment is required, redirect to payment page
+                      if (data.requiresPayment) {
+                        if (confirm('Subscription created successfully! You need to complete payment setup to activate it. Redirect to payment page now?')) {
+                          window.location.href = data.paymentUrl || '/detailer/subscription/payment';
+                        } else {
+                          // Still refresh the page to show updated pricing model
+                          window.location.href = '/detailer/settings';
+                        }
+                      } else {
+                        // Force a hard refresh to ensure server component reloads with new data
+                        window.location.href = '/detailer/settings';
+                      }
                     } else {
-                      const error = await response.json();
-                      alert(error.error || 'Failed to update pricing model');
+                      // Enhanced error message display
+                      const errorMessage = data.error || 'Failed to update pricing model';
+                      const errorDetails = data.details ? `\n\nDetails: ${data.details}` : '';
+                      alert(errorMessage + errorDetails);
                     }
                   } catch (error) {
                     console.error('Error switching pricing model:', error);
-                    alert('Failed to update pricing model');
+                    alert('Failed to update pricing model. Please check your connection and try again.');
                   }
                 }}
                 disabled={!detailer || detailer.pricing_model === 'subscription'}
@@ -314,16 +332,21 @@ export default function SettingsPageClient({
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ pricing_model: 'percentage' }),
                     });
+                    
+                    const data = await response.json();
+                    
                     if (response.ok) {
-                      router.refresh();
-                      alert('Pricing model updated successfully!');
+                      // Wait a moment for database update to complete
+                      await new Promise(resolve => setTimeout(resolve, 500));
+                      
+                      // Force a hard refresh to ensure server component reloads with new data
+                      window.location.href = '/detailer/settings';
                     } else {
-                      const error = await response.json();
-                      alert(error.error || 'Failed to update pricing model');
+                      alert(data.error || 'Failed to update pricing model');
                     }
                   } catch (error) {
                     console.error('Error switching pricing model:', error);
-                    alert('Failed to update pricing model');
+                    alert('Failed to update pricing model. Please check your connection and try again.');
                   }
                 }}
                 disabled={!detailer || detailer.pricing_model === 'percentage' || !detailer.pricing_model}

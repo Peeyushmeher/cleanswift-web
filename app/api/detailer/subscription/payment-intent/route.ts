@@ -111,53 +111,89 @@ export async function GET(request: NextRequest) {
       }
 
       if (!paymentIntent) {
-        // If no payment intent exists, we might need to create one
-        // This can happen if the invoice was created but payment intent wasn't set up
-        console.log('No payment intent found, attempting to create one from invoice');
+        // If no payment intent exists, create one directly for the invoice
+        // This happens when invoice is finalized but has no payment method attached
+        console.log('No payment intent found, creating one directly for invoice');
         console.log('Invoice status:', latestInvoice.status);
+        console.log('Invoice amount due:', latestInvoice.amount_due);
+        console.log('Invoice currency:', latestInvoice.currency);
         
-        // Try to finalize the invoice to create a payment intent
-        if (latestInvoice.status === 'draft' || latestInvoice.status === 'open') {
+        // Only create payment intent if invoice is 'open' and has amount due
+        if (latestInvoice.status === 'open' && latestInvoice.amount_due > 0) {
           try {
-            console.log('Finalizing invoice:', latestInvoice.id);
-            const finalizedInvoice = await stripe.invoices.finalizeInvoice(latestInvoice.id, {
-              expand: ['payment_intent'],
+            const invoiceAmount = latestInvoice.amount_due;
+            const invoiceCurrency = latestInvoice.currency || 'cad';
+            const customerId = typeof latestInvoice.customer === 'string' 
+              ? latestInvoice.customer 
+              : latestInvoice.customer?.id;
+            
+            if (!customerId) {
+              console.error('No customer ID found on invoice');
+              return NextResponse.json({ 
+                error: 'Invoice does not have a customer associated. Please contact support.',
+                code: 'NO_CUSTOMER_ON_INVOICE'
+              }, { status: 400 });
+            }
+            
+            console.log('Creating PaymentIntent for invoice:', {
+              invoiceId: latestInvoice.id,
+              amount: invoiceAmount,
+              currency: invoiceCurrency,
+              customerId: customerId
             });
             
-            console.log('Invoice finalized, status:', finalizedInvoice.status);
+            // Create a PaymentIntent for the invoice amount
+            paymentIntent = await stripe.paymentIntents.create({
+              amount: invoiceAmount,
+              currency: invoiceCurrency,
+              customer: customerId,
+              automatic_payment_methods: {
+                enabled: true,
+              },
+              metadata: {
+                invoice_id: latestInvoice.id,
+                subscription_id: subscription.id,
+                detailer_id: detailer.id,
+                type: 'subscription_setup',
+              },
+              description: `Subscription payment for invoice ${latestInvoice.number || latestInvoice.id}`,
+            });
             
-            // Get payment intent from finalized invoice
-            const finalizedPaymentIntent = typeof finalizedInvoice === 'object' && 'payment_intent' in finalizedInvoice
-              ? (finalizedInvoice as any).payment_intent
-              : null;
-            console.log('Finalized invoice payment intent:', finalizedPaymentIntent);
+            console.log('✅ Created PaymentIntent:', paymentIntent.id);
+            console.log('PaymentIntent status:', paymentIntent.status);
+            console.log('PaymentIntent has client_secret:', !!paymentIntent.client_secret);
             
-            if (finalizedPaymentIntent) {
-              paymentIntent = typeof finalizedPaymentIntent === 'string'
-                ? await stripe.paymentIntents.retrieve(finalizedPaymentIntent)
-                : finalizedPaymentIntent;
-              if (paymentIntent && typeof paymentIntent === 'object' && 'id' in paymentIntent) {
-                console.log('Payment intent after finalization:', paymentIntent.id, paymentIntent.status);
-              }
-            }
-          } catch (finalizeError: any) {
-            console.error('Error finalizing invoice:', finalizeError);
-            console.error('Finalize error code:', finalizeError.code);
-            console.error('Finalize error message:', finalizeError.message);
+          } catch (createError: any) {
+            console.error('Error creating payment intent:', createError);
+            console.error('Create error code:', createError.code);
+            console.error('Create error message:', createError.message);
             return NextResponse.json({ 
-              error: 'Failed to set up payment. Please contact support.',
-              details: finalizeError.message,
-              code: 'INVOICE_FINALIZE_FAILED'
+              error: 'Failed to create payment intent. Please contact support.',
+              details: createError.message,
+              code: 'PAYMENT_INTENT_CREATE_FAILED'
             }, { status: 500 });
           }
+        } else if (latestInvoice.status === 'open' && latestInvoice.amount_due === 0) {
+          // Invoice has no amount due - subscription might be free or already paid
+          console.log('Invoice is open but has no amount due');
+          return NextResponse.json({ 
+            error: 'Invoice has no amount due. Your subscription may already be active.',
+            code: 'NO_AMOUNT_DUE',
+            subscriptionStatus: subscription.status
+          }, { status: 400 });
         } else {
-          console.error('Invoice is not in a state that can be finalized. Status:', latestInvoice.status);
+          console.error('Invoice is not in a state that allows payment intent creation. Status:', latestInvoice.status);
+          return NextResponse.json({ 
+            error: 'Cannot create payment intent for invoice. Please contact support.',
+            code: 'INVOICE_STATE_INVALID',
+            details: `Invoice status: ${latestInvoice.status}, Subscription status: ${subscription.status}`
+          }, { status: 400 });
         }
         
         if (!paymentIntent) {
-          console.error('Still no payment intent after attempting to finalize invoice');
+          console.error('Failed to create payment intent for invoice');
           return NextResponse.json({ 
-            error: 'No payment intent found for subscription. Please contact support.',
+            error: 'No payment intent found or could not be created. Please contact support.',
             code: 'NO_PAYMENT_INTENT',
             details: `Invoice status: ${latestInvoice.status}, Subscription status: ${subscription.status}`
           }, { status: 404 });
