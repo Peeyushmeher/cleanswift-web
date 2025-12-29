@@ -24,7 +24,7 @@ You need to deploy 3 new Edge Functions:
 ### **Option A: Deploy via Supabase Dashboard** (Easiest)
 
 1. **Go to Supabase Dashboard**
-   - Navigate to: https://supabase.com/dashboard/project/nxxjpstkgbyaazmcybsf/edge-functions
+   - Navigate to: https://supabase.com/dashboard/project/YOUR_PROJECT_REF/edge-functions
 
 2. **Deploy `process-detailer-transfer`**
    - Click **"New Function"** or **"Deploy Function"**
@@ -54,7 +54,7 @@ npm install -g supabase
 supabase login
 
 # Link to your project
-supabase link --project-ref nxxjpstkgbyaazmcybsf
+supabase link --project-ref YOUR_PROJECT_REF
 
 # Deploy the new functions
 supabase functions deploy process-detailer-transfer
@@ -75,7 +75,7 @@ All Edge Functions need these environment variables. Configure them in:
 
 ```env
 # Supabase Configuration
-SUPABASE_URL=https://nxxjpstkgbyaazmcybsf.supabase.co
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 SUPABASE_ANON_KEY=your_anon_key_here
 
@@ -89,7 +89,7 @@ ALLOWED_ORIGINS=https://your-app.vercel.app,https://cleanswift.app
 
 ### **How to Get These Values:**
 
-1. **SUPABASE_URL**: `https://nxxjpstkgbyaazmcybsf.supabase.co` (already known)
+1. **SUPABASE_URL**: `https://YOUR_PROJECT_REF.supabase.co` (replace with your project URL)
 2. **SUPABASE_SERVICE_ROLE_KEY**: 
    - Go to: **Settings → API → service_role key** (secret)
    - Copy the key (starts with `eyJ...`)
@@ -132,10 +132,10 @@ SELECT cron.schedule(
   '*/5 * * * *', -- Every 5 minutes
   $$
   SELECT net.http_post(
-    url := 'https://nxxjpstkgbyaazmcybsf.supabase.co/functions/v1/process-pending-transfers',
+    url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/process-pending-transfers',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
-      'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54eGpwc3RrZ2J5YWF6bWN5YnNmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MzI5NzY2OCwiZXhwIjoyMDc4ODczNjY4fQ.q9_N7IQB84m9FdxHW6DNMOwiPDZ9M9miybN5qwPopNQ'
+      'Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY_HERE'
     ),
     body := '{}'::jsonb
   );
@@ -156,10 +156,10 @@ SELECT cron.schedule(
   '*/15 * * * *', -- Every 15 minutes
   $$
   SELECT net.http_post(
-    url := 'https://nxxjpstkgbyaazmcybsf.supabase.co/functions/v1/retry-failed-transfers',
+    url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/retry-failed-transfers',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
-      'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54eGpwc3RrZ2J5YWF6bWN5YnNmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MzI5NzY2OCwiZXhwIjoyMDc4ODczNjY4fQ.q9_N7IQB84m9FdxHW6DNMOwiPDZ9M9miybN5qwPopNQ'
+      'Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY_HERE'
     ),
     body := '{}'::jsonb
   );
@@ -225,7 +225,7 @@ If you don't have a webhook yet:
 2. **Click "Add endpoint"**
 3. **Endpoint URL:**
    ```
-   https://nxxjpstkgbyaazmcybsf.supabase.co/functions/v1/handle-stripe-webhook
+   https://YOUR_PROJECT_REF.supabase.co/functions/v1/handle-stripe-webhook
    ```
 4. **Events to send:** Select these events:
    - `payment_intent.succeeded`
@@ -309,7 +309,7 @@ Since you have **two separate webhook endpoints** (one for regular payments, one
 ```bash
 # Call the Edge Function directly
 curl -X POST \
-  'https://nxxjpstkgbyaazmcybsf.supabase.co/functions/v1/process-pending-transfers' \
+  'https://YOUR_PROJECT_REF.supabase.co/functions/v1/process-pending-transfers' \
   -H 'Authorization: Bearer YOUR_SERVICE_ROLE_KEY' \
   -H 'Content-Type: application/json' \
   -d '{}'

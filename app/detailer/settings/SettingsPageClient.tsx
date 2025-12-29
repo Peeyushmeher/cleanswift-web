@@ -11,6 +11,7 @@ interface SettingsPageClientProps {
   serviceAreas: any[];
   notificationSettings: any;
   detailer?: any;
+  detailerNotificationPrefs?: any;
 }
 
 export default function SettingsPageClient({
@@ -18,6 +19,7 @@ export default function SettingsPageClient({
   serviceAreas,
   notificationSettings,
   detailer,
+  detailerNotificationPrefs,
 }: SettingsPageClientProps) {
   const router = useRouter();
   const supabase = createClient();
@@ -79,6 +81,21 @@ export default function SettingsPageClient({
   });
   const [avatarUrl, setAvatarUrl] = useState<string | null>(detailer?.avatar_url || null);
 
+  // Detailer-specific notification preferences (SMS/Email per event)
+  const [notifPrefs, setNotifPrefs] = useState({
+    sms_enabled: detailerNotificationPrefs?.sms_enabled ?? true,
+    email_enabled: detailerNotificationPrefs?.email_enabled ?? true,
+    new_booking_sms: detailerNotificationPrefs?.new_booking_sms ?? true,
+    new_booking_email: detailerNotificationPrefs?.new_booking_email ?? true,
+    booking_cancelled_sms: detailerNotificationPrefs?.booking_cancelled_sms ?? true,
+    booking_cancelled_email: detailerNotificationPrefs?.booking_cancelled_email ?? true,
+    booking_reminder_sms: detailerNotificationPrefs?.booking_reminder_sms ?? true,
+    booking_reminder_email: detailerNotificationPrefs?.booking_reminder_email ?? true,
+    payout_sms: detailerNotificationPrefs?.payout_sms ?? true,
+    payout_email: detailerNotificationPrefs?.payout_email ?? true,
+    reminder_hours_before: detailerNotificationPrefs?.reminder_hours_before ?? 24,
+  });
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
@@ -112,6 +129,28 @@ export default function SettingsPageClient({
             email_enabled: formData.email_enabled,
           })
           .eq('user_id', profile.id);
+      }
+
+      // Update detailer notification preferences (SMS/Email per event)
+      if (detailer?.id) {
+        await supabase
+          .from('detailer_notification_preferences')
+          .upsert({
+            detailer_id: detailer.id,
+            sms_enabled: notifPrefs.sms_enabled,
+            email_enabled: notifPrefs.email_enabled,
+            new_booking_sms: notifPrefs.new_booking_sms,
+            new_booking_email: notifPrefs.new_booking_email,
+            booking_cancelled_sms: notifPrefs.booking_cancelled_sms,
+            booking_cancelled_email: notifPrefs.booking_cancelled_email,
+            booking_reminder_sms: notifPrefs.booking_reminder_sms,
+            booking_reminder_email: notifPrefs.booking_reminder_email,
+            payout_sms: notifPrefs.payout_sms,
+            payout_email: notifPrefs.payout_email,
+            reminder_hours_before: notifPrefs.reminder_hours_before,
+          }, {
+            onConflict: 'detailer_id',
+          });
       }
 
       router.refresh();
@@ -232,28 +271,202 @@ export default function SettingsPageClient({
       {/* Notification Preferences */}
       <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
         <h2 className="text-xl font-semibold text-white mb-4">Notification Preferences</h2>
-        <div className="space-y-4">
+        
+        {/* Global Toggles */}
+        <div className="space-y-4 mb-6">
+          <h3 className="text-sm font-medium text-[#C6CFD9] mb-2">Global Settings</h3>
           <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-[#C6CFD9]">Push Notifications</span>
-            <input
-              type="checkbox"
-              checked={formData.push_enabled}
-              onChange={(e) => setFormData({ ...formData, push_enabled: e.target.checked })}
-              suppressHydrationWarning
-              className="w-12 h-6 rounded-full bg-[#050B12] border border-white/5 appearance-none relative cursor-pointer checked:bg-[#32CE7A] transition-colors"
-            />
+            <div>
+              <span className="text-white">SMS Notifications</span>
+              <p className="text-xs text-[#C6CFD9] mt-0.5">Receive text messages for job updates</p>
+            </div>
+            <div className="relative">
+              <input
+                type="checkbox"
+                checked={notifPrefs.sms_enabled}
+                onChange={(e) => setNotifPrefs({ ...notifPrefs, sms_enabled: e.target.checked })}
+                suppressHydrationWarning
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-[#050B12] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#32CE7A]"></div>
+            </div>
           </label>
           <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-[#C6CFD9]">Email Notifications</span>
-            <input
-              type="checkbox"
-              checked={formData.email_enabled}
-              onChange={(e) => setFormData({ ...formData, email_enabled: e.target.checked })}
-              suppressHydrationWarning
-              className="w-12 h-6 rounded-full bg-[#050B12] border border-white/5 appearance-none relative cursor-pointer checked:bg-[#32CE7A] transition-colors"
-            />
+            <div>
+              <span className="text-white">Email Notifications</span>
+              <p className="text-xs text-[#C6CFD9] mt-0.5">Receive emails for job updates</p>
+            </div>
+            <div className="relative">
+              <input
+                type="checkbox"
+                checked={notifPrefs.email_enabled}
+                onChange={(e) => setNotifPrefs({ ...notifPrefs, email_enabled: e.target.checked })}
+                suppressHydrationWarning
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-[#050B12] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#32CE7A]"></div>
+            </div>
           </label>
         </div>
+
+        {/* Per-Event Notifications */}
+        <div className="border-t border-white/5 pt-6">
+          <h3 className="text-sm font-medium text-[#C6CFD9] mb-4">Event Notifications</h3>
+          
+          {/* New Booking */}
+          <div className="mb-6 p-4 bg-[#050B12] rounded-lg">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">🚗</span>
+              <span className="text-white font-medium">New Booking Offers</span>
+            </div>
+            <p className="text-xs text-[#C6CFD9] mb-3">Get notified when a new job is offered to you</p>
+            <div className="flex gap-6">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.new_booking_sms}
+                  onChange={(e) => setNotifPrefs({ ...notifPrefs, new_booking_sms: e.target.checked })}
+                  disabled={!notifPrefs.sms_enabled}
+                  suppressHydrationWarning
+                  className="w-4 h-4 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A] focus:ring-offset-0 disabled:opacity-50"
+                />
+                <span className={`text-sm ${!notifPrefs.sms_enabled ? 'text-[#C6CFD9]/50' : 'text-[#C6CFD9]'}`}>SMS</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.new_booking_email}
+                  onChange={(e) => setNotifPrefs({ ...notifPrefs, new_booking_email: e.target.checked })}
+                  disabled={!notifPrefs.email_enabled}
+                  suppressHydrationWarning
+                  className="w-4 h-4 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A] focus:ring-offset-0 disabled:opacity-50"
+                />
+                <span className={`text-sm ${!notifPrefs.email_enabled ? 'text-[#C6CFD9]/50' : 'text-[#C6CFD9]'}`}>Email</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Booking Cancelled */}
+          <div className="mb-6 p-4 bg-[#050B12] rounded-lg">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">❌</span>
+              <span className="text-white font-medium">Booking Cancellations</span>
+            </div>
+            <p className="text-xs text-[#C6CFD9] mb-3">Get notified when a customer cancels a booking</p>
+            <div className="flex gap-6">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.booking_cancelled_sms}
+                  onChange={(e) => setNotifPrefs({ ...notifPrefs, booking_cancelled_sms: e.target.checked })}
+                  disabled={!notifPrefs.sms_enabled}
+                  suppressHydrationWarning
+                  className="w-4 h-4 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A] focus:ring-offset-0 disabled:opacity-50"
+                />
+                <span className={`text-sm ${!notifPrefs.sms_enabled ? 'text-[#C6CFD9]/50' : 'text-[#C6CFD9]'}`}>SMS</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.booking_cancelled_email}
+                  onChange={(e) => setNotifPrefs({ ...notifPrefs, booking_cancelled_email: e.target.checked })}
+                  disabled={!notifPrefs.email_enabled}
+                  suppressHydrationWarning
+                  className="w-4 h-4 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A] focus:ring-offset-0 disabled:opacity-50"
+                />
+                <span className={`text-sm ${!notifPrefs.email_enabled ? 'text-[#C6CFD9]/50' : 'text-[#C6CFD9]'}`}>Email</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Booking Reminder */}
+          <div className="mb-6 p-4 bg-[#050B12] rounded-lg">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">⏰</span>
+              <span className="text-white font-medium">Upcoming Job Reminders</span>
+            </div>
+            <p className="text-xs text-[#C6CFD9] mb-3">Get reminded before your scheduled jobs</p>
+            <div className="flex gap-6 mb-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.booking_reminder_sms}
+                  onChange={(e) => setNotifPrefs({ ...notifPrefs, booking_reminder_sms: e.target.checked })}
+                  disabled={!notifPrefs.sms_enabled}
+                  suppressHydrationWarning
+                  className="w-4 h-4 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A] focus:ring-offset-0 disabled:opacity-50"
+                />
+                <span className={`text-sm ${!notifPrefs.sms_enabled ? 'text-[#C6CFD9]/50' : 'text-[#C6CFD9]'}`}>SMS</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.booking_reminder_email}
+                  onChange={(e) => setNotifPrefs({ ...notifPrefs, booking_reminder_email: e.target.checked })}
+                  disabled={!notifPrefs.email_enabled}
+                  suppressHydrationWarning
+                  className="w-4 h-4 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A] focus:ring-offset-0 disabled:opacity-50"
+                />
+                <span className={`text-sm ${!notifPrefs.email_enabled ? 'text-[#C6CFD9]/50' : 'text-[#C6CFD9]'}`}>Email</span>
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-[#C6CFD9]">Remind me</label>
+              <select
+                value={notifPrefs.reminder_hours_before}
+                onChange={(e) => setNotifPrefs({ ...notifPrefs, reminder_hours_before: parseInt(e.target.value) })}
+                className="px-2 py-1 bg-[#0A1A2F] border border-white/10 rounded text-white text-sm focus:outline-none focus:border-[#32CE7A]/40"
+              >
+                <option value={12}>12 hours</option>
+                <option value={24}>24 hours</option>
+                <option value={48}>48 hours</option>
+              </select>
+              <span className="text-xs text-[#C6CFD9]">before the job</span>
+            </div>
+          </div>
+
+          {/* Payout Processed */}
+          <div className="p-4 bg-[#050B12] rounded-lg">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">💰</span>
+              <span className="text-white font-medium">Payout Notifications</span>
+            </div>
+            <p className="text-xs text-[#C6CFD9] mb-3">Get notified when your weekly payout is processed</p>
+            <div className="flex gap-6">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.payout_sms}
+                  onChange={(e) => setNotifPrefs({ ...notifPrefs, payout_sms: e.target.checked })}
+                  disabled={!notifPrefs.sms_enabled}
+                  suppressHydrationWarning
+                  className="w-4 h-4 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A] focus:ring-offset-0 disabled:opacity-50"
+                />
+                <span className={`text-sm ${!notifPrefs.sms_enabled ? 'text-[#C6CFD9]/50' : 'text-[#C6CFD9]'}`}>SMS</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.payout_email}
+                  onChange={(e) => setNotifPrefs({ ...notifPrefs, payout_email: e.target.checked })}
+                  disabled={!notifPrefs.email_enabled}
+                  suppressHydrationWarning
+                  className="w-4 h-4 rounded border-white/20 bg-[#0A1A2F] text-[#32CE7A] focus:ring-[#32CE7A] focus:ring-offset-0 disabled:opacity-50"
+                />
+                <span className={`text-sm ${!notifPrefs.email_enabled ? 'text-[#C6CFD9]/50' : 'text-[#C6CFD9]'}`}>Email</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Phone number notice */}
+        {!profile.phone && (
+          <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+            <p className="text-sm text-yellow-300">
+              <strong>Note:</strong> Add your phone number above to receive SMS notifications.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Pricing Model */}

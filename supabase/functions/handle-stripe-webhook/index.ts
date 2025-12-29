@@ -385,7 +385,15 @@ async function handlePaymentIntentSucceeded(
         // Verify the status was updated to 'offered'
         const { data: finalBooking } = await supabase
           .from('bookings')
-          .select('status, detailer_id')
+          .select(`
+            status, 
+            detailer_id,
+            scheduled_date,
+            scheduled_time_start,
+            city,
+            services:service_id (name),
+            users:user_id (full_name)
+          `)
           .eq('id', bookingId)
           .single();
         
@@ -402,6 +410,53 @@ async function handlePaymentIntentSucceeded(
                 .eq('id', bookingId);
               console.log('✅ Fixed booking status to "offered"');
             }
+          }
+          
+          // Send notification to the assigned detailer
+          try {
+            console.log('📬 Sending new booking notification to detailer...');
+            
+            // Format date and time for display
+            const dateFormatted = new Date(finalBooking.scheduled_date).toLocaleDateString('en-US', {
+              weekday: 'long',
+              month: 'long',
+              day: 'numeric',
+            });
+            
+            const timeFormatted = finalBooking.scheduled_time_start 
+              ? new Date(`2000-01-01T${finalBooking.scheduled_time_start}`).toLocaleTimeString('en-US', {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  hour12: true,
+                })
+              : 'TBD';
+            
+            const serviceName = (finalBooking.services as { name?: string })?.name || 'Auto Detailing';
+            const customerName = (finalBooking.users as { full_name?: string })?.full_name || 'Customer';
+            
+            const { error: notifyError } = await supabase.functions.invoke('send-detailer-notification', {
+              body: {
+                detailer_id: assignedDetailerId,
+                notification_type: 'new_booking',
+                data: {
+                  booking_id: bookingId,
+                  service_name: serviceName,
+                  scheduled_date: dateFormatted,
+                  scheduled_time: timeFormatted,
+                  customer_name: customerName,
+                  location_city: finalBooking.city,
+                },
+              },
+            });
+            
+            if (notifyError) {
+              console.error('⚠️ Failed to send notification (non-blocking):', notifyError);
+            } else {
+              console.log('✅ New booking notification sent to detailer');
+            }
+          } catch (notifyError) {
+            // Don't fail the webhook if notification fails
+            console.error('⚠️ Error sending notification (non-blocking):', notifyError);
           }
         }
       } else {

@@ -4,9 +4,9 @@
 # This allows you to test the weekly batch payout system immediately
 
 # Replace with your actual service role key
-SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54eGpwc3RrZ2J5YWF6bWN5YnNmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MzI5NzY2OCwiZXhwIjoyMDc4ODczNjY4fQ.q9_N7IQB84m9FdxHW6DNMOwiPDZ9M9miybN5qwPopNQ"
+SERVICE_ROLE_KEY="YOUR_SERVICE_ROLE_KEY_HERE"
 
-SUPABASE_URL="https://nxxjpstkgbyaazmcybsf.supabase.co"
+SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
 
 echo "🚀 Triggering weekly payout processing..."
 echo ""

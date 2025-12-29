@@ -111,7 +111,7 @@ I checked your Supabase project and these Edge Functions are already deployed:
 
 5. **Endpoint URL:** 
    ```
-   https://nxxjpstkgbyaazmcybsf.supabase.co/functions/v1/handle-stripe-webhook
+   https://YOUR_PROJECT_REF.supabase.co/functions/v1/handle-stripe-webhook
    ```
    (This is your Supabase project URL + the webhook function)
 

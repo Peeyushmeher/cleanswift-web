@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS pg_net;
 DO $$
 DECLARE
   v_service_role_key text;
-  v_supabase_url text := 'https://nxxjpstkgbyaazmcybsf.supabase.co';
+  v_supabase_url text := 'https://YOUR_PROJECT_REF.supabase.co';
 BEGIN
   -- Get service role key from environment variable or set it here
   -- For security, you should set this via Supabase Dashboard → Settings → Database → Custom Roles
@@ -61,7 +61,7 @@ $$;
 DO $$
 DECLARE
   v_service_role_key text;
-  v_supabase_url text := 'https://nxxjpstkgbyaazmcybsf.supabase.co';
+  v_supabase_url text := 'https://YOUR_PROJECT_REF.supabase.co';
 BEGIN
   -- Get service role key (same as above)
   v_service_role_key := current_setting('app.settings.service_role_key', true);

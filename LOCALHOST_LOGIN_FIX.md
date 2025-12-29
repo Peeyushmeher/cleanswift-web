@@ -8,7 +8,7 @@ Login works on the hosted version but fails on localhost. This is almost always 
 ### Step 1: Configure Supabase Redirect URLs
 
 1. Go to your Supabase Dashboard: https://supabase.com/dashboard
-2. Select your project: `nxxjpstkgbyaazmcybsf`
+2. Select your project: `YOUR_PROJECT_REF`
 3. Navigate to **Authentication** → **URL Configuration**
 4. In the **Redirect URLs** section, add:
    ```
@@ -75,7 +75,7 @@ If login still doesn't work:
 2. **Verify Environment Variables**
    ```bash
    # Make sure these are set in .env.local
-   NEXT_PUBLIC_SUPABASE_URL=https://nxxjpstkgbyaazmcybsf.supabase.co
+   NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_key_here
    ```
 
