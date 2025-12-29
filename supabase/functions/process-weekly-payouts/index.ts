@@ -362,6 +362,33 @@ serve(async (req) => {
             batchesCreated++; // Only count as new batch if we created it
           }
           transfersProcessed += transfers.length;
+          
+          // Send payout notification to the detailer
+          try {
+            console.log('📬 Sending payout notification to detailer...');
+            
+            const { error: notifyError } = await supabase.functions.invoke('send-detailer-notification', {
+              body: {
+                detailer_id: detailerId,
+                notification_type: 'payout_processed',
+                data: {
+                  amount: batch.total_amount_cents,
+                  week_start: weekStartStr,
+                  week_end: weekEndStr,
+                  total_jobs: batch.total_transfers,
+                },
+              },
+            });
+            
+            if (notifyError) {
+              console.error('⚠️ Failed to send payout notification (non-blocking):', notifyError);
+            } else {
+              console.log('✅ Payout notification sent to detailer');
+            }
+          } catch (notifyError) {
+            // Don't fail the payout if notification fails
+            console.error('⚠️ Error sending payout notification (non-blocking):', notifyError);
+          }
         }
 
       } catch (error) {

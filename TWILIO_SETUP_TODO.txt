@@ -1,0 +1,56 @@
+===========================================
+TWILIO SMS SETUP - REMAINING TASKS
+===========================================
+
+Status: Email notifications working ✅
+        SMS notifications pending ❌
+        CRON jobs configured ✅
+        Scalability optimizations applied ✅
+
+-----------
+ISSUE
+-----------
+Twilio returning "Authenticate" error - credentials are invalid.
+
+Current configured values:
+- TWILIO_ACCOUNT_SID: Starts with AC68... (may be incorrect)
+- TWILIO_AUTH_TOKEN: Set but invalid
+- TWILIO_PHONE_NUMBER_US: +17052437713
+
+-----------
+TO FIX
+-----------
+1. Go to https://www.twilio.com/console
+2. Verify/copy the correct Account SID (starts with "AC")
+3. Click "Show" next to Auth Token and copy the CURRENT token
+4. Run these commands with correct values:
+
+   supabase secrets set TWILIO_ACCOUNT_SID=ACyour_correct_sid --project-ref YOUR_PROJECT_REF
+   supabase secrets set TWILIO_AUTH_TOKEN=your_correct_token --project-ref YOUR_PROJECT_REF
+
+5. Redeploy the function:
+   supabase functions deploy send-detailer-notification --project-ref YOUR_PROJECT_REF
+
+6. Test:
+   curl -X POST 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/send-detailer-notification' \
+     -H 'Content-Type: application/json' \
+     -H "Authorization: Bearer YOUR_SERVICE_ROLE_KEY" \
+     -d '{
+       "detailer_id": "3c80c250-6271-45b7-bdc2-e1d13e67a9e4",
+       "notification_type": "new_booking",
+       "data": {
+         "service_name": "Test Service",
+         "scheduled_date": "Monday, January 6",
+         "scheduled_time": "10:00 AM",
+         "location_city": "Toronto"
+       }
+     }'
+
+-----------
+NOTES
+-----------
+- Phone number format should be E.164 (e.g., +14155551234)
+- Make sure the Twilio phone number is SMS-capable
+- For trial accounts, verify recipient numbers first at:
+  https://www.twilio.com/console/phone-numbers/verified
+

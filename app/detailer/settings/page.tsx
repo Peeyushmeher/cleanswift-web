@@ -57,6 +57,17 @@ export default async function SettingsPage() {
     .eq('user_id', profile.id)
     .single();
 
+  // Get detailer notification preferences (SMS/Email for each event)
+  let detailerNotificationPrefs = null;
+  if (detailerData?.id) {
+    const { data: prefs } = await supabase
+      .from('detailer_notification_preferences')
+      .select('*')
+      .eq('detailer_id', detailerData.id)
+      .single();
+    detailerNotificationPrefs = prefs;
+  }
+
   return (
     <div className="min-h-screen bg-[#050B12] text-white">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -82,6 +93,7 @@ export default async function SettingsPage() {
           serviceAreas={serviceAreas}
           notificationSettings={notificationSettings}
           detailer={detailerWithStripe}
+          detailerNotificationPrefs={detailerNotificationPrefs}
         />
       </div>
     </div>
