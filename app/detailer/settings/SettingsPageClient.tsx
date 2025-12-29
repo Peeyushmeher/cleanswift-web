@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import AvatarUpload from '@/components/detailer/AvatarUpload';
 
 interface SettingsPageClientProps {
   profile: any;
@@ -76,6 +77,7 @@ export default function SettingsPageClient({
     push_enabled: notificationSettings?.push_enabled ?? true,
     email_enabled: notificationSettings?.email_enabled ?? false,
   });
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(detailer?.avatar_url || null);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -128,6 +130,22 @@ export default function SettingsPageClient({
       <div className="bg-[#0A1A2F] border border-white/5 rounded-xl p-6">
         <h2 className="text-xl font-semibold text-white mb-4">Profile</h2>
         <div className="space-y-4">
+          {/* Avatar Upload */}
+          <div>
+            <label className="block text-sm font-medium text-[#C6CFD9] mb-2">
+              Profile Picture
+            </label>
+            <AvatarUpload
+              profileId={profile.id}
+              currentAvatarUrl={avatarUrl}
+              fullName={formData.full_name || profile.full_name || ''}
+              onAvatarUpdated={(newUrl) => {
+                setAvatarUrl(newUrl);
+                // Refresh the page to show updated avatar
+                router.refresh();
+              }}
+            />
+          </div>
           <div>
             <label className="block text-sm font-medium text-[#C6CFD9] mb-2">
               Full Name
