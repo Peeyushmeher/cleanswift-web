@@ -114,44 +114,49 @@ export default async function OnboardingPage() {
             </Link>
 
             {/* Organization Option */}
-            <Link href="/onboard/organization" className="group">
-              <div className="card p-8 h-full hover:border-cyan-500/50 transition-all cursor-pointer">
-                <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mb-6 group-hover:bg-cyan-500/20 transition-colors">
+            <div className="relative opacity-75">
+              <div className="card p-8 h-full border-slate-700/50 cursor-not-allowed">
+                <div className="w-16 h-16 rounded-2xl bg-slate-500/10 border border-slate-500/20 flex items-center justify-center text-slate-400 mb-6">
                   <BuildingIcon />
                 </div>
-                <h3 className="font-display text-2xl font-bold mb-3">Organization / Team</h3>
-                <p className="text-slate-400 mb-6">
+                <div className="flex items-center gap-3 mb-3">
+                  <h3 className="font-display text-2xl font-bold">Organization / Team</h3>
+                  <span className="px-3 py-1 text-xs font-semibold rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    Coming Soon
+                  </span>
+                </div>
+                <p className="text-slate-500 mb-6">
                   Ideal for businesses with multiple detailers. You&apos;ll manage teams, assign jobs, and track organization-wide performance.
                 </p>
-                <ul className="space-y-2 text-sm text-slate-300 mb-6">
+                <ul className="space-y-2 text-sm text-slate-400 mb-6">
                   <li className="flex items-center gap-2">
-                    <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                     Manage multiple detailers
                   </li>
                   <li className="flex items-center gap-2">
-                    <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                     Assign jobs to team members
                   </li>
                   <li className="flex items-center gap-2">
-                    <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                     Track organization earnings
                   </li>
                 </ul>
-                <div className="text-cyan-400 font-medium group-hover:translate-x-2 transition-transform inline-flex items-center gap-2">
-                  Get Started
+                <div className="text-slate-500 font-medium inline-flex items-center gap-2">
+                  Coming Soon
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M5 12h14"/>
                     <path d="m12 5 7 7-7 7"/>
                   </svg>
                 </div>
               </div>
-            </Link>
+            </div>
           </div>
 
           <div className="mt-12 text-center">
