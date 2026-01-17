@@ -168,8 +168,8 @@ export default function TermsOfServicePage() {
                 <a href="/refund-policy" className="text-[#22d3ee] hover:text-[#06b6d4] underline">
                   Refund Policy
                 </a> or contact us at{" "}
-                <a href="mailto:support@cleanswift.app" className="text-[#22d3ee] hover:text-[#06b6d4] underline">
-                  support@cleanswift.app
+                <a href="mailto:cleanswift.app@gmail.com" className="text-[#22d3ee] hover:text-[#06b6d4] underline">
+                  cleanswift.app@gmail.com
                 </a>.
               </p>
             </section>
@@ -212,8 +212,8 @@ export default function TermsOfServicePage() {
               <h3 className="text-xl font-semibold mb-3 mt-6 text-[#f8fafc]">10.3 Dispute Resolution</h3>
               <p className="text-[#cbd5e1] leading-relaxed">
                 If you have a dispute with a service provider, please contact us at{" "}
-                <a href="mailto:support@cleanswift.app" className="text-[#22d3ee] hover:text-[#06b6d4] underline">
-                  support@cleanswift.app
+                <a href="mailto:cleanswift.app@gmail.com" className="text-[#22d3ee] hover:text-[#06b6d4] underline">
+                  cleanswift.app@gmail.com
                 </a>. We will attempt to facilitate resolution but are not obligated to resolve disputes between 
                 users and service providers.
               </p>
@@ -254,7 +254,7 @@ export default function TermsOfServicePage() {
               <h3 className="text-xl font-semibold mb-3 text-[#f8fafc]">13.1 Arbitration</h3>
               <p className="text-[#cbd5e1] leading-relaxed">
                 Any dispute arising out of or relating to these Terms or the Service shall be resolved through 
-                binding arbitration in accordance with the rules of [ARBITRATION ORGANIZATION], except where 
+                binding arbitration in accordance with the rules of ADR Chambers, except where 
                 prohibited by law.
               </p>
 
@@ -276,8 +276,8 @@ export default function TermsOfServicePage() {
               </p>
               <p className="text-[#cbd5e1] leading-relaxed mt-4">
                 You may terminate your account at any time by contacting us at{" "}
-                <a href="mailto:support@cleanswift.app" className="text-[#22d3ee] hover:text-[#06b6d4] underline">
-                  support@cleanswift.app
+                <a href="mailto:cleanswift.app@gmail.com" className="text-[#22d3ee] hover:text-[#06b6d4] underline">
+                  cleanswift.app@gmail.com
                 </a>.
               </p>
             </section>
@@ -302,7 +302,7 @@ export default function TermsOfServicePage() {
                 16. Governing Law
               </h2>
               <p className="text-[#cbd5e1] leading-relaxed">
-                These Terms shall be governed by and construed in accordance with the laws of [JURISDICTION], 
+                These Terms shall be governed by and construed in accordance with the laws of the Province of Ontario, Canada, 
                 without regard to its conflict of law provisions.
               </p>
             </section>
@@ -317,15 +317,15 @@ export default function TermsOfServicePage() {
               <div className="bg-[#0f172a] border border-[rgba(148,163,184,0.1)] rounded-lg p-6">
                 <p className="text-[#cbd5e1]">
                   <strong className="text-[#f8fafc]">Email:</strong>{" "}
-                  <a href="mailto:support@cleanswift.app" className="text-[#22d3ee] hover:text-[#06b6d4] underline">
-                    support@cleanswift.app
+                  <a href="mailto:cleanswift.app@gmail.com" className="text-[#22d3ee] hover:text-[#06b6d4] underline">
+                    cleanswift.app@gmail.com
                   </a>
                 </p>
                 <p className="text-[#cbd5e1] mt-2">
-                  <strong className="text-[#f8fafc]">Business Address:</strong> [YOUR BUSINESS ADDRESS]
+                  <strong className="text-[#f8fafc]">Business Address:</strong> 45 Epps Crescent, Ajax, Ontario L1Z 1G2, Canada
                 </p>
                 <p className="text-[#cbd5e1] mt-2">
-                  <strong className="text-[#f8fafc]">Jurisdiction:</strong> [JURISDICTION]
+                  <strong className="text-[#f8fafc]">Jurisdiction:</strong> Province of Ontario, Canada
                 </p>
               </div>
             </section>

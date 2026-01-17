@@ -56,3 +56,4 @@ CREATE POLICY "Detailers can view customer cars for assigned bookings"
 -- ============================================================================
 
 
+

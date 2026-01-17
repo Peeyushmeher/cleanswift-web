@@ -24,3 +24,4 @@ DROP POLICY IF EXISTS "Detailers can view customer profiles for assigned booking
 -- ============================================================================
 
 
+

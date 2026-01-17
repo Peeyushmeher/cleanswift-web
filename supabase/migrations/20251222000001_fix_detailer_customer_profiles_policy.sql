@@ -39,3 +39,4 @@ CREATE POLICY "Detailers can view customer profiles for assigned bookings"
 -- ============================================================================
 
 
+
